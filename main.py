@@ -105,6 +105,12 @@ hyp = {
     },
     'misc': {
         'num_tokens': 50304, # Rounded to the nearest value of 64 for efficiency
+        'num_special_tokens': 5,
+        'causal_token': 50304,
+        's_denoising_token': 50305,
+        'x_denoising_token': 50306,
+        'r_denoising_token': 50307,
+        'mask_token': 50308,
         'sequence_length': {
             'max': max_sequence_length,
             'initial': 32,      # Very short initial sequence length seems to help a lot
@@ -315,7 +321,7 @@ def make_attn(settings: dict[str, Any]):
 
 def make_net(settings: dict[str, Any]):
     network_dict = nn.ModuleDict({
-        'embedding': nn.Embedding(hyp['misc']['num_tokens'], settings['width'], scale_grad_by_freq=True),
+        'embedding': nn.Embedding(hyp['misc']['num_tokens']+hyp['misc']['num_special_tokens'], settings['width'], scale_grad_by_freq=True),
         'attn_layers': nn.ModuleList([make_attn(settings) for _ in range(settings['depth'])]),
         'norm': nn.LayerNorm(settings['width'], bias=False),
         'outputs': nn.Linear(settings['width'], hyp['misc']['num_tokens'], bias=False),
@@ -336,7 +342,7 @@ def make_net(settings: dict[str, Any]):
 ########################################
 
 # Get a single batch item. Currently used in the training loop
-@torch.no_grad
+@torch.no_grad()
 def get_batch(data_dict, key, batchsize, length):
     start_indexes     = torch.randint(len(data_dict[key])-length-1, (batchsize,), device=hyp['misc']['device']) # warning, completely random sampling, not a random derangement, that might help performance a bit!
     sequence_indexes  = start_indexes.unsqueeze(-1) + batch_index_offsets[:length+1].unsqueeze(0) # slice, as batch_index_offsets are pre-allocated to max length for efficiency
