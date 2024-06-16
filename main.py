@@ -14,7 +14,7 @@ except NameError:
 
 import itertools
 import argparse
-from typing import Any
+from typing import Any, Literal
 from functools import partial
 import subprocess
 
@@ -252,11 +252,14 @@ class LatentAttentionBlock(nn.Module):
         # Has a high lr mult applied to it so that each layer can learn its own attention scale.
         self.position_bias_mult = nn.Parameter(torch.tensor(1., device='cuda'))
 
-    def forward(self, x):
+    def forward(self, x, mode: Literal['causal', 's_denoising', 'r_denoising', 'x_denoising'] = "causal"):
         residual = x
 
         # Make additive attention mask, scaled by a learned mult for the position bias (lets us learn dynamic attention ranges per layer as needed)
-        attn_mask = torch.where(causal_mask[:x.shape[1], :x.shape[1]], F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]], negative_infinity_matrix_base[:x.shape[1], :x.shape[1]])
+        if mode == "causal":
+            attn_mask = torch.where(causal_mask[:x.shape[1], :x.shape[1]], F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]], negative_infinity_matrix_base[:x.shape[1], :x.shape[1]])
+        else:
+            attn_mask = F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]]
         # Shared LayerNorm for linear layers and attention
         x = self.norm(x)
 
