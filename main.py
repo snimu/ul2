@@ -369,10 +369,20 @@ def get_causal_data(sequence: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]
 
 @torch.no_grad()
 def get_s_denoised_data(
-        sequence: torch.Tensor, mask_width: int | None, masking_rate: float = 0.5
+        sequence: torch.Tensor,
+        mask_width: int | None,
+        masking_rate: float = 0.5,
+        causal: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    targets = sequence.roll(1)
-    targets[:, 0] = hyp['misc']['s_denoising_token']  # will be in input -> predict in output
+    if causal:
+        targets = torch.zeros_like(
+            sequence, 
+            device=hyp['misc']['device'], 
+            dtype=torch.bfloat16
+        ).copy_(sequence)  # copy sequence to not have negative downstream effects
+    else:
+        targets = sequence.roll(1)
+        targets[:, 0] = hyp['misc']['s_denoising_token']  # will be in input -> predict in output
 
     mask_width = mask_width or math.floor(masking_rate * sequence.shape[-1])
     mask_width = min(mask_width, math.floor(masking_rate * sequence.shape[-1]))
@@ -388,8 +398,15 @@ def get_r_denoised_data(
         sequence: torch.Tensor,
         mask_width: int | None,
         masking_rate: float,
+        causal: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    return mask_spans(sequence, mask_width, masking_rate, hyp['misc']['r_denoising_token'])
+    return mask_spans(
+        sequence=sequence, 
+        mask_width=mask_width, 
+        masking_rate=masking_rate,
+        mode_token=hyp['misc']['r_denoising_token'],
+        causal=causal,
+    )
 
 
 @torch.no_grad()
@@ -397,8 +414,15 @@ def get_x_denoised_data(
         sequence: torch.Tensor,
         mask_width: int | None,
         masking_rate: float,
+        causal: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    return mask_spans(sequence, mask_width, masking_rate, hyp['misc']['x_denoising_token'])
+    return mask_spans(
+        sequence=sequence, 
+        mask_width=mask_width, 
+        masking_rate=masking_rate,
+        mode_token=hyp['misc']['x_denoising_token'],
+        causal=causal,
+    )
 
 
 @torch.no_grad()
@@ -407,9 +431,17 @@ def mask_spans(
         mask_width: int,
         masking_rate: float,
         mode_token: int,
+        causal: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    targets = sequence.roll(1)
-    targets[:, 0] = mode_token
+    if causal:
+        targets = torch.zeros_like(
+            sequence, 
+            device=hyp['misc']['device'], 
+            dtype=torch.bfloat16
+        ).copy_(sequence)
+    else:
+        targets = sequence.roll(1)
+        targets[:, 0] = mode_token
 
     assert 0.0 <= masking_rate <= 1.0, "masking_rate must be between 0 and 1"
 
@@ -575,7 +607,8 @@ def format_num_params(num_params: int, round_to_digits: int = 1) -> str:
 def calc_pplx(loss: torch.Tensor | float) -> torch.Tensor | float:
     return 2.71828 ** loss
 
-def eval(net):
+
+def eval(net, causal_denoisers: bool = False):
     ####################
     # Evaluation  Mode #
     ####################
@@ -601,16 +634,16 @@ def eval(net):
             val_loss += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
             val_acc  += 1./num_eval_steps * (outputs.argmax(-1) == targets).float().mean()
 
-            inputs, targets = get_s_denoised_data(sequence, mask_width=None, masking_rate=0.25)
-            outputs = net(inputs, mode='s_denoising')
+            inputs, targets = get_s_denoised_data(sequence, mask_width=None, masking_rate=0.25, causal=causal_denoisers)
+            outputs = net(inputs, mode='causal' if causal_denoisers else 's_denoising')
             val_loss_s += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
 
-            inputs, targets = get_r_denoised_data(sequence, mask_width=3, masking_rate=0.15)
-            outputs = net(inputs, mode='r_denoising')
+            inputs, targets = get_r_denoised_data(sequence, mask_width=3, masking_rate=0.15, causal=causal_denoisers)
+            outputs = net(inputs, mode='causal' if causal_denoisers else 'r_denoising')
             val_loss_r += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
 
-            inputs, targets = get_x_denoised_data(sequence, mask_width=8, masking_rate=0.5)
-            outputs = net(inputs, mode='x_denoising')
+            inputs, targets = get_x_denoised_data(sequence, mask_width=8, masking_rate=0.5, causal=causal_denoisers)
+            outputs = net(inputs, mode='causal' if causal_denoisers else 'x_denoising')
             val_loss_x += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
 
         val_pplx = calc_pplx(val_loss)
@@ -734,18 +767,18 @@ def train(net: SpeedyLangNet | None = None, **settings):
         sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
 
         if settings['ul2']:
-            inputs, targets = get_s_denoised_data(sequence, mask_width=None, masking_rate=0.25)
-            outputs = net(inputs, mode='s_denoising')
+            inputs, targets = get_s_denoised_data(sequence, mask_width=None, masking_rate=0.25, causal=settings['causal_denoisers'])
+            outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 's_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / 6.
             loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
 
-            inputs, targets = get_r_denoised_data(sequence, mask_width=3, masking_rate=0.15)
-            outputs = net(inputs, mode='r_denoising')
+            inputs, targets = get_r_denoised_data(sequence, mask_width=3, masking_rate=0.15, causal=settings['causal_denoisers'])
+            outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'r_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / 6.
             loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
 
-            inputs, targets = get_x_denoised_data(sequence, mask_width=8, masking_rate=0.5)
-            outputs = net(inputs, mode='x_denoising')
+            inputs, targets = get_x_denoised_data(sequence, mask_width=8, masking_rate=0.5, causal=settings['causal_denoisers'])
+            outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'x_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / 6.
             loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
         
@@ -1048,6 +1081,11 @@ def get_args() -> argparse.Namespace:
         action="store_true",
         help="Use the UL2 loss. FLAG"
     )
+    parser.add_argument(
+        "--causal_denoisers",
+        action="store_true",
+        help="If set, the X-, R-, and S-denoisers work in a fully causal, but masked, setting. FLAG"
+    )
 
     # PARSE ARGS
     args = parser.parse_args()
@@ -1062,6 +1100,8 @@ def get_args() -> argparse.Namespace:
     args.model_scale = [args.model_scale] if isinstance(args.model_scale, float) else args.model_scale
     args.linear_value = [args.linear_value] if isinstance(args.linear_value, int) else args.linear_value
     args.linear_value = list(set([bool(v) for v in args.linear_value]))
+
+    args.causal_denoisers = args.causal_denoisers if args.ul2 else False
 
     if any(d is None or w is None for d in args.depth for w in args.width):
         assert all(d is None and w is None for d in args.depth for w in args.width), (
@@ -1200,6 +1240,7 @@ def main():
                 max_sequence_length=max_sequence_length,
                 seed=seed,
                 ul2=args.ul2,
+                causal_denoisers=args.causal_denoisers,
             )
 
             # You can do whatever you want with your net here; I delete it to save VRAM
@@ -1209,6 +1250,7 @@ def main():
             results = {
                 "last_val_loss": [last_val_loss],
                 "ul2": [args.ul2],
+                "causal_denoisers": [args.causal_denoisers],
                 "model_scale": [model_scale],
                 "depth": [hyp['net']['num_blocks']],
                 "width": [hyp['net']['residual_depth']],
