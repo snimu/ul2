@@ -378,7 +378,7 @@ def get_s_denoised_data(
         targets = torch.zeros_like(
             sequence, 
             device=hyp['misc']['device'], 
-            dtype=torch.bfloat16
+            dtype=torch.long,
         ).copy_(sequence)  # copy sequence to not have negative downstream effects
     else:
         targets = sequence.roll(1)
@@ -437,7 +437,7 @@ def mask_spans(
         targets = torch.zeros_like(
             sequence, 
             device=hyp['misc']['device'], 
-            dtype=torch.bfloat16
+            dtype=torch.long,
         ).copy_(sequence)
     else:
         targets = sequence.roll(1)
