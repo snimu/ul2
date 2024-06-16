@@ -323,11 +323,12 @@ def make_attn(settings: dict[str, Any]):
 
 
 def make_net(settings: dict[str, Any]):
+    total_num_tokens = hyp['misc']['num_tokens']+hyp['misc']['num_special_tokens']
     network_dict = nn.ModuleDict({
-        'embedding': nn.Embedding(hyp['misc']['num_tokens']+hyp['misc']['num_special_tokens'], settings['width'], scale_grad_by_freq=True),
+        'embedding': nn.Embedding(total_num_tokens, settings['width'], scale_grad_by_freq=True),
         'attn_layers': nn.ModuleList([make_attn(settings) for _ in range(settings['depth'])]),
         'norm': nn.LayerNorm(settings['width'], bias=False),
-        'outputs': nn.Linear(settings['width'], hyp['misc']['num_tokens'], bias=False),
+        'outputs': nn.Linear(settings['width'], total_num_tokens, bias=False),
 })
     net = SpeedyLangNet(network_dict)
     net = net.to(hyp['misc']['device'], torch.bfloat16)
@@ -348,15 +349,15 @@ def make_net(settings: dict[str, Any]):
 @torch.no_grad()
 def get_batch(data_dict, key, batchsize, length):
     start_indexes     = torch.randint(len(data_dict[key])-length-1, (batchsize,), device=hyp['misc']['device']) # warning, completely random sampling, not a random derangement, that might help performance a bit!
-    sequence_indexes  = start_indexes.unsqueeze(-1) + batch_index_offsets[:length+1].unsqueeze(0) # slice, as batch_index_offsets are pre-allocated to max length for efficiency
-    sampled_sequences = torch.take_along_dim(data_dict[key], sequence_indexes.flatten(), dim=0).view(batchsize, length+1).long() # have to flatten and reshape due to take_along_dim being 1d
+    sequence_indexes  = start_indexes.unsqueeze(-1) + batch_index_offsets[:length].unsqueeze(0) # slice, as batch_index_offsets are pre-allocated to max length for efficiency
+    sampled_sequences = torch.take_along_dim(data_dict[key], sequence_indexes.flatten(), dim=0).view(batchsize, length).long() # have to flatten and reshape due to take_along_dim being 1d
 
     return sampled_sequences
 
 
 @torch.no_grad()
 def get_causal_data(sequence: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    targets  = sequence[:, 1:] # reslice to get our shifted-by-1 targets
+    targets  = sequence
 
     # Inputs: add special token to beginning
     # Just roll the tensor and replace the first (previously final) token to get the causality going
@@ -415,13 +416,13 @@ def mask_spans(
     num_masks = math.floor(masking_rate * sequence.shape[-1] / mask_width)
 
     batch_size, seq_length = sequence.shape
-    mask = torch.randint(0, seq_length - mask_width + 1, (batch_size, num_masks))
+    mask = torch.randint(0, seq_length - mask_width + 1, (batch_size, num_masks), device=hyp['misc']['device'])
     
     # Create a tensor to hold the mask
-    mask_tensor = torch.zeros_like(sequence)
+    mask_tensor = torch.zeros_like(sequence, device=hyp['misc']['device'])
     
     # Create a range for the mask width
-    width_range = torch.arange(mask_width).unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, mask_width)
+    width_range = torch.arange(mask_width, device=hyp['misc']['device']).unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, mask_width)
     
     # Expand the mask to the desired width
     mask_positions = mask.unsqueeze(-1) + width_range  # Shape: (batch_size, num_masks, mask_width)
@@ -515,7 +516,7 @@ def grow_sequence_length(old_length, old_batchsize):
 #          Logging           #
 ##############################
 
-variables_to_log = ['epoch', 'curr_step', 'train_loss', 'val_loss', 'val_loss_s', 'val_loss_x', 'val_loss_r', 't_secs']
+variables_to_log = ['epoch', 'curr_step', 'train_loss', 'val_loss_causal', 'val_loss_s', 'val_loss_x', 'val_loss_r', 't_secs']
 # define the printing function and print the column heads
 def print_training_details(columns_list, separator_left='  ', separator_right='  |', column_labels_only=False, is_final_entry=False):
     output_line = "|" # start with the left bar
@@ -736,20 +737,17 @@ def train(net: SpeedyLangNet | None = None, **settings):
             inputs, targets = get_s_denoised_data(sequence, mask_width=None, masking_rate=0.25)
             outputs = net(inputs, mode='s_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / 6.
-            with torch.no_grad():
-                loss.div(discrete_sampled_microbatch_steps).backward()
+            loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
 
             inputs, targets = get_r_denoised_data(sequence, mask_width=3, masking_rate=0.15)
             outputs = net(inputs, mode='r_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / 6.
-            with torch.no_grad():
-                loss.div(discrete_sampled_microbatch_steps).backward()
+            loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
 
             inputs, targets = get_x_denoised_data(sequence, mask_width=8, masking_rate=0.5)
             outputs = net(inputs, mode='x_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / 6.
-            with torch.no_grad():
-                loss.div(discrete_sampled_microbatch_steps).backward()
+            loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
         
         inputs, targets = get_causal_data(sequence)
         outputs = net(inputs, mode='causal')
