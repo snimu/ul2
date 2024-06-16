@@ -1198,6 +1198,8 @@ def main():
                 f"\n:::    {width=}"
                 f"\n:::    num_params={format_num_params(num_params)}"
                 f"\n:::    num_non_embedding_params={format_num_params(num_non_embedding_params)}"
+                f"\n:::    ul2={args.ul2}"
+                f"\n:::    causal_denoisers={args.causal_denoisers}"
             )
             max_len = max(len(line) for line in title.split("\n"))
             title = "\n".join([line + " " * (max_len - len(line)) + " :::" for line in title.split("\n")])
