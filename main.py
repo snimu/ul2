@@ -674,6 +674,8 @@ def train(net: SpeedyLangNet | None = None, **settings):
         wandb.init(
             project=settings['wandb_project'], 
             config=settings,
+            name=f"ul2_{settings['ul2']}_causal_{settings['causal_denoisers']}"
+            f"_depth_{settings['depth']}_width_{settings['width']}_seed_{settings['seed']}",
         )
 
     # Full-run statistics variables
