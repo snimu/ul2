@@ -1044,6 +1044,13 @@ def get_args() -> argparse.Namespace:
         "If something is wrong with the settings, you can easily see it here, return early, and fix it. FLAG"
     )
 
+    # Custom settings
+    parser.add_argument(
+        "--ul2",
+        action="store_true",
+        help="Use the UL2 loss. FLAG"
+    )
+
     # PARSE ARGS
     args = parser.parse_args()
 
@@ -1194,6 +1201,7 @@ def main():
                 tokens_per_batch_capacity=tokens_per_batch_capacity,
                 max_sequence_length=max_sequence_length,
                 seed=seed,
+                ul2=args.ul2,
             )
 
             # You can do whatever you want with your net here; I delete it to save VRAM
@@ -1202,6 +1210,7 @@ def main():
             # Save results
             results = {
                 "last_val_loss": [last_val_loss],
+                "ul2": [args.ul2],
                 "model_scale": [model_scale],
                 "depth": [hyp['net']['num_blocks']],
                 "width": [hyp['net']['residual_depth']],
