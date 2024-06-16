@@ -257,7 +257,6 @@ class LatentAttentionBlock(nn.Module):
 
         # Make additive attention mask, scaled by a learned mult for the position bias (lets us learn dynamic attention ranges per layer as needed)
         attn_mask = torch.where(causal_mask[:x.shape[1], :x.shape[1]], F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]], negative_infinity_matrix_base[:x.shape[1], :x.shape[1]])
-
         # Shared LayerNorm for linear layers and attention
         x = self.norm(x)
 
@@ -348,9 +347,95 @@ def get_batch(data_dict, key, batchsize, length):
     sequence_indexes  = start_indexes.unsqueeze(-1) + batch_index_offsets[:length+1].unsqueeze(0) # slice, as batch_index_offsets are pre-allocated to max length for efficiency
     sampled_sequences = torch.take_along_dim(data_dict[key], sequence_indexes.flatten(), dim=0).view(batchsize, length+1).long() # have to flatten and reshape due to take_along_dim being 1d
 
-    inputs, targets  = sampled_sequences[:, :-1], sampled_sequences[:, 1:] # reslice to get our input tokens and our shifted-by-1 targets
+    return sampled_sequences
+
+
+@torch.no_grad()
+def get_causal_data(sequence: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    targets  = sequence[:, 1:] # reslice to get our shifted-by-1 targets
+
+    # Inputs: add special token to beginning
+    # Just roll the tensor and replace the first (previously final) token to get the causality going
+    inputs = sequence.roll(1, dims=-1)
+    inputs[:, 0] = hyp['misc']['causal_token']
 
     return inputs, targets
+
+
+@torch.no_grad()
+def get_s_denoised_data(
+        sequence: torch.Tensor, mask_width: int, masking_rate: float = 0.5
+) -> tuple[torch.Tensor, torch.Tensor]:
+    targets = sequence.roll(1)
+    targets[:, 0] = hyp['misc']['s_denoising_token']  # will be in input -> predict in output
+
+    mask_width = min(mask_width, math.floor(masking_rate * sequence.shape[-1]))
+    inputs = sequence.roll(1, dims=-1)
+    inputs [:, -mask_width:] = hyp['misc']['mask_token']
+    inputs[:, 0] = hyp['misc']['s_denoising_token']
+
+    return inputs, targets
+
+
+@torch.no_grad()
+def get_r_denoised_data(
+        sequence: torch.Tensor,
+        mask_width: int,
+        masking_rate: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return mask_spans(sequence, mask_width, masking_rate, hyp['misc']['r_denoising_token'])
+
+
+@torch.no_grad()
+def get_x_denoised_data(
+        sequence: torch.Tensor,
+        mask_width: int,
+        masking_rate: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return mask_spans(sequence, mask_width, masking_rate, hyp['misc']['x_denoising_token'])
+
+
+@torch.no_grad()
+def mask_spans(
+        sequence: torch.Tensor,
+        mask_width: int,
+        masking_rate: float,
+        mode_token: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    targets = sequence.roll(1)
+    targets[:, 0] = mode_token
+
+    assert 0.0 <= masking_rate <= 1.0, "masking_rate must be between 0 and 1"
+
+    num_masks = math.floor(masking_rate * sequence.shape[-1] / mask_width)
+
+    batch_size, seq_length = sequence.shape
+    mask = torch.randint(0, seq_length - mask_width + 1, (batch_size, num_masks))
+    
+    # Create a tensor to hold the mask
+    mask_tensor = torch.zeros_like(sequence)
+    
+    # Create a range for the mask width
+    width_range = torch.arange(mask_width).unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, mask_width)
+    
+    # Expand the mask to the desired width
+    mask_positions = mask.unsqueeze(-1) + width_range  # Shape: (batch_size, num_masks, mask_width)
+    
+    # Clip the positions to stay within sequence bounds
+    mask_positions = mask_positions.clamp(0, seq_length - 1)
+    
+    # Scatter the mask positions into the mask tensor
+    mask_tensor.scatter_(1, mask_positions.view(batch_size, -1), 1)
+
+    # Apply the mask to the sequence
+    inputs = sequence.masked_fill(mask_tensor.bool(), hyp['misc']['mask_token'])
+
+    # Add task token
+    inputs = inputs.roll(1, dims=-1)
+    inputs[:, 0] = mode_token
+
+    return inputs, targets
+
 
 # Make loss function
 loss_fn = nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
