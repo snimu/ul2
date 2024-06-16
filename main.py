@@ -17,6 +17,7 @@ import argparse
 from typing import Any, Literal
 from functools import partial
 import subprocess
+import random
 
 import zipfile
 import math
@@ -306,11 +307,11 @@ class SpeedyLangNet(nn.Module):
         super().__init__()
         self.net_dict = network_dict
 
-    def forward(self, x):
+    def forward(self, x, mode: Literal['causal', 's_denoising', 'r_denoising', 'x_denoising'] = "causal"):
         # Look up the input embeddings from the input tokens
         x = self.net_dict['embedding'](x)
         for attn_block in self.net_dict['attn_layers']:
-            x = attn_block(x) # note: residuals are included in the block definitions for these layers
+            x = attn_block(x, mode=mode) # note: residuals are included in the block definitions for these layers
         x = self.net_dict['norm'](x)
         x = self.net_dict['outputs'](x)
         return x
@@ -367,11 +368,12 @@ def get_causal_data(sequence: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]
 
 @torch.no_grad()
 def get_s_denoised_data(
-        sequence: torch.Tensor, mask_width: int, masking_rate: float = 0.5
+        sequence: torch.Tensor, mask_width: int | None, masking_rate: float = 0.5
 ) -> tuple[torch.Tensor, torch.Tensor]:
     targets = sequence.roll(1)
     targets[:, 0] = hyp['misc']['s_denoising_token']  # will be in input -> predict in output
 
+    mask_width = mask_width or math.floor(masking_rate * sequence.shape[-1])
     mask_width = min(mask_width, math.floor(masking_rate * sequence.shape[-1]))
     inputs = sequence.roll(1, dims=-1)
     inputs [:, -mask_width:] = hyp['misc']['mask_token']
@@ -383,7 +385,7 @@ def get_s_denoised_data(
 @torch.no_grad()
 def get_r_denoised_data(
         sequence: torch.Tensor,
-        mask_width: int,
+        mask_width: int | None,
         masking_rate: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     return mask_spans(sequence, mask_width, masking_rate, hyp['misc']['r_denoising_token'])
@@ -392,7 +394,7 @@ def get_r_denoised_data(
 @torch.no_grad()
 def get_x_denoised_data(
         sequence: torch.Tensor,
-        mask_width: int,
+        mask_width: int | None,
         masking_rate: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     return mask_spans(sequence, mask_width, masking_rate, hyp['misc']['x_denoising_token'])
@@ -513,7 +515,7 @@ def grow_sequence_length(old_length, old_batchsize):
 #          Logging           #
 ##############################
 
-variables_to_log = ['epoch', 'curr_step', 'train_loss', 'val_loss', 'val_pplx', 'train_acc', 'val_acc', 'grad_norm', 'microbatch_steps', 't_secs']
+variables_to_log = ['epoch', 'curr_step', 'train_loss', 'val_loss', 'val_loss_s', 'val_loss_x', 'val_loss_r', 't_secs']
 # define the printing function and print the column heads
 def print_training_details(columns_list, separator_left='  ', separator_right='  |', column_labels_only=False, is_final_entry=False):
     output_line = "|" # start with the left bar
@@ -585,18 +587,42 @@ def eval(net):
 
     # float32 here to prevent truncation errors
     val_loss, val_acc = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float), torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
-
+    val_loss_s = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
+    val_loss_r = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
+    val_loss_x = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
     with torch.no_grad():
         # Note: We eval at the maximum sequence length so that we can get an idea of how well the sequence length growing extrapolates out
         for _ in range(num_eval_steps):
-            inputs, targets = get_batch(data, key='eval', batchsize=eval_batchsize, length=hyp['misc']['sequence_length']['max'])
-            outputs = net(inputs)
+            sequence = get_batch(data, key='eval', batchsize=eval_batchsize, length=hyp['misc']['sequence_length']['max'])
+            
+            inputs, targets = get_causal_data(sequence)
+            outputs = net(inputs, mode='causal')
             val_loss += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
             val_acc  += 1./num_eval_steps * (outputs.argmax(-1) == targets).float().mean()
 
-        val_pplx = calc_pplx(val_loss)
+            inputs, targets = get_s_denoised_data(sequence, mask_width=None, masking_rate=0.25)
+            outputs = net(inputs, mode='s_denoising')
+            val_loss_s += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
 
-    return val_acc.item(), val_loss.item(), val_pplx.item()
+            inputs, targets = get_r_denoised_data(sequence, mask_width=3, masking_rate=0.15)
+            outputs = net(inputs, mode='r_denoising')
+            val_loss_r += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+
+            inputs, targets = get_x_denoised_data(sequence, mask_width=8, masking_rate=0.5)
+            outputs = net(inputs, mode='x_denoising')
+            val_loss_x += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+
+        val_pplx = calc_pplx(val_loss)
+        val_pplx_s = calc_pplx(val_loss_s)
+        val_pplx_r = calc_pplx(val_loss_r)
+        val_pplx_x = calc_pplx(val_loss_x)
+
+    return (
+        val_acc.item(), val_loss.item(), val_pplx.item(),
+        val_loss_s.item(), val_pplx_s.item(),
+        val_loss_r.item(), val_pplx_r.item(),
+        val_loss_x.item(), val_pplx_x.item(),
+    )
 
 
 def train(net: SpeedyLangNet | None = None, **settings):
@@ -633,7 +659,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
     assert final_batchsize > 1, f"Error: Specified configuration takes up too much memory (calculated final batchsize {final_batchsize} is less than 1!)"
 
     # Validation parameters
-    val_loss, val_acc, val_pplx = None, None, None
+    val_loss_causal, val_acc, val_pplx = None, None, None
 
     # Get the total number of parameters in our model and use that to generate/calculate the base lr.
     total_trainable_params = sum([p.data.numel() if p.requires_grad else 0 for p in net.parameters()])
@@ -677,7 +703,9 @@ def train(net: SpeedyLangNet | None = None, **settings):
     scheduler         = torch.optim.lr_scheduler.LambdaLR(opt, [k['scheduler'] for k in param_groups_dict.values()])
 
     # Save some results
-    train_losses, val_losses, train_accs, val_accs, train_pplxs, val_pplxs = [], [], [], [], [], []
+    train_losses, val_losses_causal, train_accs, val_accs, train_pplxs, val_pplxs_causal = [], [], [], [], [], []
+    val_losses_x, val_losses_r, val_losses_s = [], [], []
+    val_pplxs_x, val_pplxs_r, val_pplxs_s = [], [], []
     grad_norms, cumulative_time = [], []
     tokens_seen_list, epochs_list = [], []
     batch_sizes = []
@@ -702,11 +730,30 @@ def train(net: SpeedyLangNet | None = None, **settings):
 
     # Main loop. Most of the complexity here is in the dynamic growing scheduler(s).
     while True:
-        inputs, targets = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
+        sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
 
-        outputs = net(inputs)
+        if settings['ul2']:
+            inputs, targets = get_s_denoised_data(sequence, mask_width=None, masking_rate=0.25)
+            outputs = net(inputs, mode='s_denoising')
+            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / 6.
+            with torch.no_grad():
+                loss.div(discrete_sampled_microbatch_steps).backward()
 
-        loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1))
+            inputs, targets = get_r_denoised_data(sequence, mask_width=3, masking_rate=0.15)
+            outputs = net(inputs, mode='r_denoising')
+            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / 6.
+            with torch.no_grad():
+                loss.div(discrete_sampled_microbatch_steps).backward()
+
+            inputs, targets = get_x_denoised_data(sequence, mask_width=8, masking_rate=0.5)
+            outputs = net(inputs, mode='x_denoising')
+            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / 6.
+            with torch.no_grad():
+                loss.div(discrete_sampled_microbatch_steps).backward()
+        
+        inputs, targets = get_causal_data(sequence)
+        outputs = net(inputs, mode='causal')
+        loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) * (0.5 if settings['ul2'] else 1.)
 
         loss.div(discrete_sampled_microbatch_steps).backward()
         tokens_seen += curr_batchsize * curr_length
@@ -790,21 +837,38 @@ def train(net: SpeedyLangNet | None = None, **settings):
             train_loss = loss.detach().cpu().item() # Update the loss for the training details printout
 
             net.eval()
-            val_acc, val_loss, val_pplx = eval(net)
+            (
+                val_acc, val_loss_causal, val_pplx,
+                val_loss_s, val_pplx_s,
+                val_loss_r, val_pplx_r,
+                val_loss_x, val_pplx_x,
+            ) = eval(net)
 
-            val_losses.append(val_loss)
+            val_losses_causal.append(val_loss_causal)
+            val_losses_s.append(val_loss_s)
+            val_losses_r.append(val_loss_r)
+            val_losses_x.append(val_loss_x)
+            val_pplxs_causal.append(val_pplx)
+            val_pplxs_s.append(val_pplx_s)
+            val_pplxs_r.append(val_pplx_r)
+            val_pplxs_x.append(val_pplx_x)
             val_accs.append(val_acc)
-            val_pplxs.append(val_pplx)
             
             if settings['log_wandb']:
                 wandb.log({
-                    'train_loss': train_loss,
-                    'train_acc': train_acc,
-                    'train_pplx': calc_pplx(train_loss),
-                    'val_loss': val_loss, 
-                    'val_acc': val_acc, 
-                    'val_pplx': val_pplx, 
-                    'tokens_seen_val': tokens_seen, 
+                    'train/loss': train_loss,
+                    'train/acc': train_acc,
+                    'train/pplx': calc_pplx(train_loss),
+                    'val/loss/causal': val_loss_causal, 
+                    'val/acc/causal': val_acc, 
+                    'val/pplx/causal': val_pplx, 
+                    'val/loss/S_denoised': val_loss_s,
+                    'val/pplx/S_denoised': val_pplx_s,
+                    'val/loss/R_denoised': val_loss_r,
+                    'val/pplx/R_denoised': val_pplx_r,
+                    'val/loss/X_denoised': val_loss_x,
+                    'val/pplx/X_denoised': val_pplx_x,
+                    'tokens_seen': tokens_seen, 
                     'epoch': epoch,
                     'batch_size': curr_batchsize,
                     'sequence_length': curr_length,
@@ -825,8 +889,12 @@ def train(net: SpeedyLangNet | None = None, **settings):
             break
 
     return (
-        net, val_loss,
-        train_losses, val_losses, train_accs, val_accs, train_pplxs, val_pplxs, 
+        net, val_loss_causal,
+        train_losses, train_pplxs, train_accs,
+        val_losses_causal, val_pplxs_causal, val_accs,
+        val_losses_s, val_pplxs_s,
+        val_losses_r, val_pplxs_r,
+        val_losses_x, val_pplxs_x,
         grad_norms, cumulative_time, 
         tokens_seen_list, epochs_list,
         batch_sizes, sequence_lengths, learning_rates, weight_decays,
@@ -1097,11 +1165,15 @@ def main():
 
             # Train
             (
-                    net, last_val_loss,
-                    train_losses, val_losses, train_accs, val_accs, train_pplxs, val_pplxs, 
-                    grad_norms, cumulative_times, 
-                    tokens_seen_list, epochs_list,
-                    batch_sizes, sequence_lengths, learning_rates, weight_decays,
+                net, last_val_loss,
+                train_losses, train_pplxs, train_accs,
+                val_losses_causal, val_pplxs_causal, val_accs_causal,
+                val_losses_s, val_pplxs_s,
+                val_losses_r, val_pplxs_r,
+                val_losses_x, val_pplxs_x,
+                grad_norms, cumulative_times,
+                tokens_seen_list, epochs_list,
+                batch_sizes, sequence_lengths, learning_rates, weight_decays,
             ) = train(
                 net=None,  # you can give this the net and it will just continue training on it
                 depth=depth,
@@ -1145,11 +1217,17 @@ def main():
                 "max_time_seconds": [args.max_time_seconds],
                 "gpu_capacity_scalar": [args.gpu_capacity_scalar],
                 "train_loss": [str(train_losses)],
-                "val_loss": [str(val_losses)],
-                "train_acc": [str(train_accs)],
-                "val_acc": [str(val_accs)],
                 "train_pplx": [str(train_pplxs)],
-                "val_pplx": [str(val_pplxs)],
+                "train_acc": [str(train_accs)],
+                "val_loss_causal": [str(val_losses_causal)],
+                "val_pplx_causal": [str(val_pplxs_causal)],
+                "val_acc_causal": [str(val_accs_causal)],
+                "val_loss_s": [str(val_losses_s)],
+                "val_pplx_s": [str(val_pplxs_s)],
+                "val_loss_r": [str(val_losses_r)],
+                "val_pplx_r": [str(val_pplxs_r)],
+                "val_loss_x": [str(val_losses_x)],
+                "val_pplx_x": [str(val_pplxs_x)],
                 "grad_norm": [str(grad_norms)],
                 "cumulative_time": [str(cumulative_times)],
                 "tokens_seen": [str(tokens_seen_list)],
