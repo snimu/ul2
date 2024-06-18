@@ -670,12 +670,24 @@ def train(net: SpeedyLangNet | None = None, **settings):
 
     # Init wandb 
     if settings['log_wandb']:
+        run_name = f"depth_{settings['depth']}_width_{settings['width']}_seed_{settings['seed']}"
+        if settings['ul2']:
+            run_name = (
+                "loss-dividers-C-S-R-X_"
+                f"{settings['causal_divider']}-{settings['s_divider']}"
+                f"-{settings['r_divider']}-{settings['x_divider']}_"
+            ) + run_name
+
+            if settings['causal_denoisers']:
+                run_name = "ul2-causal_" + run_name 
+            else: 
+                run_name = "ul2_" + run_name
+
         wandb.finish()  # Finish any previous runs
         wandb.init(
             project=settings['wandb_project'], 
             config=settings,
-            name=f"ul2_{settings['ul2']}_causal_{settings['causal_denoisers']}"
-            f"_depth_{settings['depth']}_width_{settings['width']}_seed_{settings['seed']}",
+            name=run_name,
         )
 
     # Full-run statistics variables
@@ -771,22 +783,22 @@ def train(net: SpeedyLangNet | None = None, **settings):
         if settings['ul2']:
             inputs, targets = get_s_denoised_data(sequence, mask_width=None, masking_rate=0.25, causal=settings['causal_denoisers'])
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 's_denoising')
-            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / 6.
+            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["s_divider"]  # 6.
             loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
 
             inputs, targets = get_r_denoised_data(sequence, mask_width=3, masking_rate=0.15, causal=settings['causal_denoisers'])
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'r_denoising')
-            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / 6.
+            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["r_divider"]  # 6.
             loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
 
             inputs, targets = get_x_denoised_data(sequence, mask_width=8, masking_rate=0.5, causal=settings['causal_denoisers'])
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'x_denoising')
-            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / 6.
+            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["x_divider"]  # 6.
             loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
         
         inputs, targets = get_causal_data(sequence)
         outputs = net(inputs, mode='causal')
-        loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) * (0.5 if settings['ul2'] else 1.)
+        loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) * settings["causal_divider"]  # (0.5 if settings['ul2'] else 1.)
 
         loss.div(discrete_sampled_microbatch_steps).backward()
         tokens_seen += curr_batchsize * curr_length
@@ -1088,22 +1100,60 @@ def get_args() -> argparse.Namespace:
         action="store_true",
         help="If set, the X-, R-, and S-denoisers work in a fully causal, but masked, setting. FLAG"
     )
+    parser.add_argument(
+        "--s_divider",
+        type=float, default=6., nargs="+",
+        help="Divider for the S-denoising loss. TYPE: float; DEFAULT: 6."
+    )
+    parser.add_argument(
+        "--r_divider",
+        type=float, default=6., nargs="+",
+        help="Divider for the R-denoising loss. TYPE: float; DEFAULT: 6."
+    )
+    parser.add_argument(
+        "--x_divider",
+        type=float, default=6., nargs="+",
+        help="Divider for the X-denoising loss. TYPE: float; DEFAULT: 6."
+    )
+    parser.add_argument(
+        "--causal_divider",
+        type=float, default=0.5, nargs="+",
+        help="Divider for the causal loss. TYPE: float; DEFAULT: 0.5"
+    )
+    parser.add_argument(
+        "--loss_divider_method",
+        type=str, choices=["zip", "product"], default="zip",
+        help="How to combine the different loss dividers. "
+        "If 'zip', the dividers are zipped together and used for each loss."
+        " If zip, all four args must have the same length. "
+        "If 'product', every possible combination of dividers is used for a setting once. "
+        "TYPE: str; DEFAULT: 'zip'"
+    )
 
     # PARSE ARGS
     args = parser.parse_args()
 
     # CHECK & PREPROCESS ARGS
+    args.causal_divider = 1.0 if not args.ul2 else args.causal_divider
+
     args.depth = [args.depth] if isinstance(args.depth, int) else args.depth
     args.width = [args.width] if isinstance(args.width, int) else args.width
     args.depth = [None if d < 1 else d for d in args.depth]
     args.width = [None if w < 1 else w for w in args.width]
     args.num_heads = [args.num_heads] if isinstance(args.num_heads, int) else args.num_heads
+    args.causal_divider = [args.causal_divider] if isinstance(args.causal_divider, float) else args.causal_divider
+    args.s_divider = [args.s_divider] if isinstance(args.s_divider, float) else args.s_divider
+    args.r_divider = [args.r_divider] if isinstance(args.r_divider, float) else args.r_divider
+    args.x_divider = [args.x_divider] if isinstance(args.x_divider, float) else args.x_divider
 
     args.model_scale = [args.model_scale] if isinstance(args.model_scale, float) else args.model_scale
     args.linear_value = [args.linear_value] if isinstance(args.linear_value, int) else args.linear_value
     args.linear_value = list(set([bool(v) for v in args.linear_value]))
 
     args.causal_denoisers = args.causal_denoisers if args.ul2 else False
+
+    if args.loss_divider_method == "zip" and not all(len(l) == len(args.s_divider) for l in [args.r_divider, args.x_divider, args.causal_divider]):
+        raise ValueError("If loss_divider_method is 'zip', all dividers must have the same length.")
 
     if any(d is None or w is None for d in args.depth for w in args.width):
         assert all(d is None and w is None for d in args.depth for w in args.width), (
@@ -1139,9 +1189,21 @@ def get_settings(args: argparse.Namespace) -> list:
         args.model_scale, args.depth, args.width, args.num_heads, args.linear_value
     ))
 
+    if args.ul2 and args.loss_divider_method == "product":
+        settings_loss_dividers = list(itertools.product(
+            args.causal_divider, args.s_divider, args.r_divider, args.x_divider
+        )) 
+    elif args.ul2 and args.loss_divider_method == "zip":
+        settings_loss_dividers = list(zip(
+            args.causal_divider, args.s_divider, args.r_divider, args.x_divider, strict=True)
+        )
+    elif not args.ul2:
+        settings_loss_dividers = [(1., 0., 0., 0.)]
+
     settings = [
-        (model_scale, depth, width, num_heads, linear_value) 
+        (model_scale, depth, width, num_heads, linear_value, causal_divider, s_divider, r_divider, x_divider) 
         for model_scale, depth, width, num_heads, linear_value in settings 
+        for causal_divider, s_divider, r_divider, x_divider in settings_loss_dividers
         if not setting_violates_rules(
             model_scale=model_scale, 
             depth=depth, 
@@ -1169,7 +1231,12 @@ def main():
     settings = get_settings(args)
 
     if args.review_settings:
-        print_settings(settings, names=["model_scale", "depth", "width", "num_heads", "linear_value"])
+        print_settings(
+            settings, names=[
+                "model_scale", "depth", "width", "num_heads", "linear_value",
+                "ul2", "causal_denoisers", "causal_divider", "s_divider", "r_divider", "x_divider"
+            ]
+        )
         proceed = input("Proceed? [y/n] ")
         if proceed.lower() != "y":
             print("Aborting.")
@@ -1181,7 +1248,7 @@ def main():
     global hyp, model_scale
     change_gpu_token_capacity(args.gpu_capacity_scalar)
 
-    for setting_num, (model_scale, depth, width, num_heads, linear_value) in enumerate(settings):
+    for setting_num, (model_scale, depth, width, num_heads, linear_value, causal_divider, s_divider, r_divider, x_divider) in enumerate(settings):
         seed = args.seed  # reset seed so that every setting goes through the same seeds over the different runs
 
         # Change the model scale; width is rounded to nearest 64, and both are None if scaled by model_scale -> get depth and width here
@@ -1202,6 +1269,10 @@ def main():
                 f"\n:::    num_non_embedding_params={format_num_params(num_non_embedding_params)}"
                 f"\n:::    ul2={args.ul2}"
                 f"\n:::    causal_denoisers={args.causal_denoisers}"
+                f"\n:::    {causal_divider=}"
+                f"\n:::    {s_divider=}"
+                f"\n:::    {r_divider=}"
+                f"\n:::    {x_divider=}"
             )
             max_len = max(len(line) for line in title.split("\n"))
             title = "\n".join([line + " " * (max_len - len(line)) + " :::" for line in title.split("\n")])
@@ -1245,6 +1316,10 @@ def main():
                 seed=seed,
                 ul2=args.ul2,
                 causal_denoisers=args.causal_denoisers,
+                causal_divider=causal_divider,
+                s_divider=s_divider,
+                r_divider=r_divider,
+                x_divider=x_divider,
             )
 
             # You can do whatever you want with your net here; I delete it to save VRAM
@@ -1255,6 +1330,10 @@ def main():
                 "last_val_loss": [last_val_loss],
                 "ul2": [args.ul2],
                 "causal_denoisers": [args.causal_denoisers],
+                "causal_divider": [args.causal_divider],
+                "s_divider": [args.s_divider],
+                "r_divider": [args.r_divider],
+                "x_divider": [args.x_divider],
                 "model_scale": [model_scale],
                 "depth": [hyp['net']['num_blocks']],
                 "width": [hyp['net']['residual_depth']],
