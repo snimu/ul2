@@ -493,21 +493,25 @@ MASKING_SETTINGS = {
 }
 
 
-def randomize_mask_width(mask_width: int, distribution: Literal["gaussian", "uniform", "noop"]) -> int:
+def randomize_with_mean(
+        mean: int,
+        distribution: Literal["gaussian", "uniform", "noop"],
+        round: bool = True,
+) -> int | float:
     if distribution == "gaussian":
-        bias = mask_width
+        bias = mean
         scale = bias / 4
         x = torch.randn(1000) * scale + bias
-        x = torch.clamp(x, 0, mask_width*2).round()
-        return int(x[torch.randint(0, 1000, (1,))])
+        x = torch.clamp(x, 0, mean*2)
+        return int(x.round()[torch.randint(0, 1000, (1,))]) if round else float(x[torch.randint(0, 1000, (1,))])
     elif distribution == "uniform":
-        bias = mask_width / 2
-        scale = mask_width
+        bias = mean / 2
+        scale = mean
         x = torch.rand(1000) * scale + bias
-        x = torch.clamp(x, 0, scale + bias).round()
-        return int(x[torch.randint(0, 1000, (1,))])
+        x = torch.clamp(x, 0, scale + bias)
+        return int(x.round()[torch.randint(0, 1000, (1,))]) if round else float(x[torch.randint(0, 1000, (1,))])
     else:
-        return mask_width
+        return mean
 
 
 def choose_setting(
@@ -520,7 +524,10 @@ def choose_setting(
     else:
         choice = MASKING_SETTINGS[f"{denoiser}_denoising"][0]
 
-    choice["mask_width"] = randomize_mask_width(choice["mask_width"], mask_width_randomization_method)
+    if denoiser in ("r", "x"):
+        choice["mask_width"] = randomize_with_mean(choice["mask_width"], mask_width_randomization_method)
+    else:
+        choice["masking_rate"] = randomize_with_mean(choice["masking_rate"], mask_width_randomization_method)
     return choice
 
 
