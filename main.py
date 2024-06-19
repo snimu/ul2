@@ -1433,7 +1433,7 @@ def main():
                 "last_val_loss": [last_val_loss],
                 "ul2": [args.ul2],
                 "causal_denoisers": [args.causal_denoisers],
-                "causal_divider": [args.causal_divider],
+                "causal_divider": [causal_divider],
                 "s_divider": [s_divider],
                 "r_divider": [r_divider],
                 "x_divider": [x_divider],
