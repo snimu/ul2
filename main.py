@@ -445,6 +445,7 @@ def mask_spans(
 
     assert 0.0 <= masking_rate <= 1.0, "masking_rate must be between 0 and 1"
 
+    mask_width = min(mask_width, math.floor(masking_rate * sequence.shape[-1]))
     num_masks = math.floor(masking_rate * sequence.shape[-1] / mask_width)
 
     batch_size, seq_length = sequence.shape
@@ -473,6 +474,29 @@ def mask_spans(
     inputs[:, 0] = mode_token
 
     return inputs, targets
+
+
+MASKING_SETTINGS = {
+    "s_denoising": [
+        dict(masking_rate=0.25),
+    ],
+    "r_denoising": [
+        dict(mask_width=3, masking_rate=0.15),
+        dict(mask_width=8, masking_rate=0.15),
+    ],
+    "x_denoising": [
+        dict(mask_width=8, masking_rate=0.5),
+        dict(mask_width=3, masking_rate=0.5),
+        dict(mask_width=64, masking_rate=0.5),
+        dict(mask_width=64, masking_rate=0.15),
+    ],
+}
+
+
+def choose_setting(denoiser: Literal["s", "r", "x"], randomize: bool = False):
+    if randomize:
+        return random.choice(MASKING_SETTINGS[f"{denoiser}_denoising"])
+    return MASKING_SETTINGS[f"{denoiser}_denoising"][0]
 
 
 # Make loss function
@@ -672,6 +696,8 @@ def train(net: SpeedyLangNet | None = None, **settings):
     if settings['log_wandb']:
         run_name = f"depth_{settings['depth']}_width_{settings['width']}_seed_{settings['seed']}"
         if settings['ul2']:
+            if settings['randomize_denoiser_settings']:
+                run_name = "random-denoiser-settings_" + run_name
             run_name = (
                 "loss-dividers-C-S-R-X_"
                 f"{settings['causal_divider']}-{settings['s_divider']}"
@@ -781,17 +807,30 @@ def train(net: SpeedyLangNet | None = None, **settings):
         sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
 
         if settings['ul2']:
-            inputs, targets = get_s_denoised_data(sequence, mask_width=None, masking_rate=0.25, causal=settings['causal_denoisers'])
+            inputs, targets = get_s_denoised_data(
+                sequence, 
+                mask_width=None, 
+                **choose_setting('s', randomize=settings['randomize_denoiser_settings']),
+                causal=settings['causal_denoisers'],
+            )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 's_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["s_divider"]  # 6.
             loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
 
-            inputs, targets = get_r_denoised_data(sequence, mask_width=3, masking_rate=0.15, causal=settings['causal_denoisers'])
+            inputs, targets = get_r_denoised_data(
+                sequence, 
+                **choose_setting('r', randomize=settings['randomize_denoiser_settings']), 
+                causal=settings['causal_denoisers'],
+            )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'r_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["r_divider"]  # 6.
             loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
 
-            inputs, targets = get_x_denoised_data(sequence, mask_width=8, masking_rate=0.5, causal=settings['causal_denoisers'])
+            inputs, targets = get_x_denoised_data(
+                sequence,
+                **choose_setting('x', randomize=settings['randomize_denoiser_settings']), 
+                causal=settings['causal_denoisers'],
+            )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'x_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["x_divider"]  # 6.
             loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
@@ -1129,6 +1168,13 @@ def get_args() -> argparse.Namespace:
         "If 'product', every possible combination of dividers is used for a setting once. "
         "TYPE: str; DEFAULT: 'zip'"
     )
+    parser.add_argument(
+        "--randomize_denoiser_settings",
+        action="store_true",
+        help="If set, will randomly choose from a set of pre-defined settings per denoiser "
+        "(pick three among the seven denoisers from UL2, one for each of S-, R-, and X-denoising). "
+        "FLAG"
+    )
 
     # PARSE ARGS
     args = parser.parse_args()
@@ -1282,6 +1328,7 @@ def main():
 
             # Seed
             torch.manual_seed(seed)
+            random.seed(seed)
 
             # Train
             (
@@ -1320,6 +1367,7 @@ def main():
                 s_divider=s_divider,
                 r_divider=r_divider,
                 x_divider=x_divider,
+                randomize_denoiser_settings=args.randomize_denoiser_settings,
             )
 
             # You can do whatever you want with your net here; I delete it to save VRAM
@@ -1334,6 +1382,7 @@ def main():
                 "s_divider": [args.s_divider],
                 "r_divider": [args.r_divider],
                 "x_divider": [args.x_divider],
+                "randomize_denoiser_settings": [args.randomize_denoiser_settings],
                 "model_scale": [model_scale],
                 "depth": [hyp['net']['num_blocks']],
                 "width": [hyp['net']['residual_depth']],
