@@ -493,10 +493,35 @@ MASKING_SETTINGS = {
 }
 
 
-def choose_setting(denoiser: Literal["s", "r", "x"], randomize: bool = False):
-    if randomize:
-        return random.choice(MASKING_SETTINGS[f"{denoiser}_denoising"])
-    return MASKING_SETTINGS[f"{denoiser}_denoising"][0]
+def randomize_mask_width(mask_width: int, distribution: Literal["gaussian", "uniform", "noop"]) -> int:
+    if distribution == "gaussian":
+        bias = mask_width
+        scale = bias / 4
+        x = torch.randn(1000) * scale + bias
+        x = torch.clamp(x, 0, mask_width*2).round()
+        return int(x[torch.randint(0, 1000, (1,))])
+    elif distribution == "uniform":
+        bias = mask_width / 2
+        scale = mask_width
+        x = torch.rand(1000) * scale + bias
+        x = torch.clamp(x, 0, scale + bias).round()
+        return int(x[torch.randint(0, 1000, (1,))])
+    else:
+        return mask_width
+
+
+def choose_setting(
+        denoiser: Literal["s", "r", "x"],
+        randomize_choice: bool = False,
+        mask_width_randomization_method: Literal["gaussian", "uniform", "noop"] = "noop",
+    ) -> dict[str, Any]:
+    if randomize_choice:
+        choice = random.choice(MASKING_SETTINGS[f"{denoiser}_denoising"])
+    else:
+        choice = MASKING_SETTINGS[f"{denoiser}_denoising"][0]
+
+    choice["mask_width"] = randomize_mask_width(choice["mask_width"], mask_width_randomization_method)
+    return choice
 
 
 # Make loss function
@@ -810,7 +835,11 @@ def train(net: SpeedyLangNet | None = None, **settings):
             inputs, targets = get_s_denoised_data(
                 sequence, 
                 mask_width=None, 
-                **choose_setting('s', randomize=settings['randomize_denoiser_settings']),
+                **choose_setting(
+                    's',
+                    randomize_choice=settings['randomize_denoiser_settings'],
+                    mask_width_randomization_method='uniform' if settings['randomize_mask_width'] else 'noop',
+                ),
                 causal=settings['causal_denoisers'],
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 's_denoising')
@@ -819,7 +848,11 @@ def train(net: SpeedyLangNet | None = None, **settings):
 
             inputs, targets = get_r_denoised_data(
                 sequence, 
-                **choose_setting('r', randomize=settings['randomize_denoiser_settings']), 
+                **choose_setting(
+                    'r',
+                    randomize_choice=settings['randomize_denoiser_settings'],
+                    mask_width_randomization_method='gaussian' if settings['randomize_mask_width'] else 'noop',
+                ), 
                 causal=settings['causal_denoisers'],
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'r_denoising')
@@ -828,7 +861,11 @@ def train(net: SpeedyLangNet | None = None, **settings):
 
             inputs, targets = get_x_denoised_data(
                 sequence,
-                **choose_setting('x', randomize=settings['randomize_denoiser_settings']), 
+                **choose_setting(
+                    'x',
+                    randomize_choice=settings['randomize_denoiser_settings'],
+                    mask_width_randomization_method='gaussian' if settings['randomize_mask_width'] else 'noop',
+                ), 
                 causal=settings['causal_denoisers'],
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'x_denoising')
@@ -1175,6 +1212,13 @@ def get_args() -> argparse.Namespace:
         "(pick three among the seven denoisers from UL2, one for each of S-, R-, and X-denoising). "
         "FLAG"
     )
+    parser.add_argument(
+        "--randomize_mask_width",
+        action="store_true",
+        help="If set, will randomly choose the mask width for the denoisers "
+        "with a mean value of the preset mask-width. "
+        "FLAG"
+    )
 
     # PARSE ARGS
     args = parser.parse_args()
@@ -1280,7 +1324,8 @@ def main():
         print_settings(
             settings, names=[
                 "model_scale", "depth", "width", "num_heads", "linear_value",
-                "ul2", "causal_denoisers", "causal_divider", "s_divider", "r_divider", "x_divider"
+                "ul2", "causal_denoisers", "causal_divider", "s_divider", "r_divider", "x_divider",
+                "randomize_denoiser_settings", "randomize_mask_width",
             ]
         )
         proceed = input("Proceed? [y/n] ")
@@ -1319,6 +1364,8 @@ def main():
                 f"\n:::    {s_divider=}"
                 f"\n:::    {r_divider=}"
                 f"\n:::    {x_divider=}"
+                f"\n:::    randomize_denoiser_settings={args.randomize_denoiser_settings}"
+                f"\n:::    randomize_mask_width={args.randomize_mask_width}"
             )
             max_len = max(len(line) for line in title.split("\n"))
             title = "\n".join([line + " " * (max_len - len(line)) + " :::" for line in title.split("\n")])
@@ -1368,6 +1415,7 @@ def main():
                 r_divider=r_divider,
                 x_divider=x_divider,
                 randomize_denoiser_settings=args.randomize_denoiser_settings,
+                randomize_mask_width=args.randomize_mask_width,
             )
 
             # You can do whatever you want with your net here; I delete it to save VRAM
@@ -1383,6 +1431,7 @@ def main():
                 "r_divider": [args.r_divider],
                 "x_divider": [args.x_divider],
                 "randomize_denoiser_settings": [args.randomize_denoiser_settings],
+                "randomize_mask_width": [args.randomize_mask_width],
                 "model_scale": [model_scale],
                 "depth": [hyp['net']['num_blocks']],
                 "width": [hyp['net']['residual_depth']],
