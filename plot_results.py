@@ -54,6 +54,14 @@ def load_xs_ys_avg_y(
         num_heads: int | None = None,
         run_num: int | None = None,
         seed: int | None = None,
+        ul2: bool | None = None,
+        causal_denoisers: bool | None = None,
+        randomize_denoiser_settings: bool | None = None,
+        randomize_mask_width: bool | None = None,
+        causal_divider: float | None = None,
+        s_divider: float | None = None,
+        r_divider: float | None = None,
+        x_divider: float | None = None,
         to_plot: Literal["val_loss", "train_losses", "val_accs", "train_accs", "val_pplxs", "train_pplxs"] = "val_loss",
         plot_over: Literal["step", "epoch", "token", "time_sec"] = "step",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -76,6 +84,22 @@ def load_xs_ys_avg_y(
         filters &= (pl.col("run_num") == run_num)
     if seed is not None:
         filters &= (pl.col("seed") == seed)
+    if ul2 is not None:
+        filters &= (pl.col("ul2") == ul2)
+    if causal_denoisers is not None:
+        filters &= (pl.col("causal_denoisers") == causal_denoisers)
+    if randomize_denoiser_settings is not None:
+        filters &= (pl.col("randomize_denoiser_settings") == randomize_denoiser_settings)
+    if randomize_mask_width is not None:
+        filters &= (pl.col("randomize_mask_width") == randomize_mask_width)
+    if causal_divider is not None:
+        filters &= (pl.col("causal_divider") == causal_divider)
+    if s_divider is not None:
+        filters &= (pl.col("s_divider") == s_divider)
+    if r_divider is not None:
+        filters &= (pl.col("r_divider") == r_divider)
+    if x_divider is not None:
+        filters &= (pl.col("x_divider") == x_divider)
 
     df = pl.scan_csv(file).filter(filters).collect()
     df.sort("run_num")
@@ -232,63 +256,129 @@ def unique_depths(file: str) -> np.ndarray:
     )
 
 
-def example_plot_fct(
+def plot_metric_curves(
         file: str,
         depth: int | None = 8,
         width: int | None = 384,
         num_heads: int | None = None,
         linear_value: bool | None = False,
+        ul2: bool | None = None,
+        causal_denoisers: bool | None = None,
+        randomize_denoiser_settings: bool | None = None,
+        randomize_mask_width: bool | None = None,
+        causal_divider: float | None = None,
+        s_divider: float | None = None,
+        r_divider: float | None = None,
+        x_divider: float | None = None,
         to_plot: Literal["val_loss", "train_losses", "val_accs", "train_accs", "val_pplxs"] = "val_loss",
         plot_over: Literal["step", "epoch", "token", "time_sec"] = "epoch",
         show: bool = True,
         loglog: bool = False,
         plot_all: bool = False,
 ) -> None:
-    settings = get_unique_settings(file, ["num_heads", "linear_value", "depth", "width"])
+    settings = get_unique_settings(
+        file,
+        [
+            "num_heads", "linear_value", "depth", "width",
+            "ul2", "causal_denoisers", "randomize_denoiser_settings",
+            "randomize_mask_width", "causal_divider", "s_divider",
+            "r_divider", "x_divider",
+        ],
+    )
+    print(len(settings))
 
     if num_heads is not None:
-        settings = [(nh, lv, d, w) for nh, lv, d, w in settings if nh == num_heads]
+        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd  in settings if nh == num_heads]
+    print(len(settings))
     if linear_value is not None:
-        settings = [(nh, lv, d, w) for nh, lv, d, w in settings if lv == linear_value]
+        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if lv == linear_value]
+    print(len(settings))
     if depth is not None:
-        settings = [(nh, lv, d, w) for nh, lv, d, w in settings if d == depth]
+        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if d == depth]
+    print(len(settings))
     if width is not None:
-        settings = [(nh, lv, d, w) for nh, lv, d, w in settings if w == width]
+        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if w == width]
+    print(len(settings))
+    if ul2 is not None:
+        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if ul2 == ul2]
+    print(len(settings))
+    if causal_denoisers is not None:
+        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if cdn == causal_denoisers]
+    print(len(settings))
+    if randomize_denoiser_settings is not None:
+        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if rds == randomize_denoiser_settings]
+    print(len(settings))
+    if randomize_mask_width is not None:
+        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if rmw == randomize_mask_width]
+    print(len(settings))
+    if causal_divider is not None:
+        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if cd == causal_divider]
+    print(len(settings))
+    if s_divider is not None:
+        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if sd == s_divider]
+    print(len(settings))
+    if causal_denoisers is not None:
+        r_divider = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if rd == r_divider]
+    print(len(settings))
+    if x_divider is not None:
+        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if xd == x_divider]
+    print(len(settings))
+
 
     colors = generate_distinct_colors(len(settings))
 
-    for color, (num_heads_, linear_value_, depth_, width_) in zip(colors, settings):
-            xs, ys, avg_ys = load_xs_ys_avg_y(
-                file,
-                depth=depth_,
-                width=width_,
-                num_heads=num_heads_,
-                linear_value=linear_value_,
-                to_plot=to_plot,
-                plot_over=plot_over,
-            )
-            if plot_all:
-                for y in ys:
-                    if loglog:
-                        plt.loglog(xs, y, color=color, alpha=0.2)
-                    else:
-                        plt.plot(xs, y, color=color, alpha=0.2)
+    for color, (
+            num_heads_, linear_value_, depth_, width_,
+            ul2_, causal_denoisers_, randomize_denoiser_settings_, randomize_mask_width_,
+            causal_divider_, s_divider_, r_divider_, x_divider_,
+    ) in zip(colors, settings):
+        xs, ys, avg_ys = load_xs_ys_avg_y(
+            file,
+            depth=depth_,
+            width=width_,
+            num_heads=num_heads_,
+            linear_value=linear_value_,
+            ul2=ul2_,
+            causal_denoisers=causal_denoisers_,
+            randomize_denoiser_settings=randomize_denoiser_settings_,
+            randomize_mask_width=randomize_mask_width_,
+            causal_divider=causal_divider_,
+            s_divider=s_divider_,
+            r_divider=r_divider_,
+            x_divider=x_divider_,
+            to_plot=to_plot,
+            plot_over=plot_over,
+        )
+        if plot_all:
+            for y in ys:
+                if loglog:
+                    plt.loglog(xs, y, color=color, alpha=0.2)
+                else:
+                    plt.plot(xs, y, color=color, alpha=0.2)
 
-            num_params = pl.scan_csv(file).filter(
-                (pl.col("num_heads") == num_heads_)
-                & (pl.col("linear_value") == linear_value_)
-                & (pl.col("depth") == depth_)
-                & (pl.col("width") == width_)
-            ).collect()["num_params"][0]
-            
-            label = (
-                f"num_heads={num_heads_}, linear_value={linear_value_}, "
-                f"depth={depth_}, width={width_}, #params={format_num_params(num_params)}"
-            )
-            if loglog:
-                plt.loglog(xs, avg_ys, color=color if plot_all else None, label=label)
-            else:
-                plt.plot(xs, avg_ys, color=color if plot_all else None, label=label)
+        num_params = pl.scan_csv(file).filter(
+            (pl.col("num_heads") == num_heads_)
+            & (pl.col("linear_value") == linear_value_)
+            & (pl.col("depth") == depth_)
+            & (pl.col("ul2") == ul2_)
+            & (pl.col("causal_denoisers") == causal_denoisers_)
+            & (pl.col("randomize_denoiser_settings") == randomize_denoiser_settings_)
+            & (pl.col("randomize_mask_width") == randomize_mask_width_)
+            & (pl.col("causal_divider") == causal_divider_)
+            & (pl.col("s_divider") == s_divider_)
+            & (pl.col("r_divider") == r_divider_)
+            & (pl.col("x_divider") == x_divider_)
+
+        ).collect()["num_params"][0]
+        
+        label = (
+            f"num_heads={num_heads_}, linear_value={linear_value_}, "
+            f"depth={depth_}, width={width_}, #params={format_num_params(num_params)}"
+        )
+        if loglog:
+            plt.loglog(xs, avg_ys, color=color if plot_all else None, label=label)
+        else:
+            plt.plot(xs, avg_ys, color=color if plot_all else None, label=label)
 
 
     fig = plt.gcf()
@@ -309,13 +399,21 @@ def example_plot_fct(
 
 
 if __name__ == "__main__":
-    example_plot_fct(
-        file="results_041.csv",
-        depth=None,  # sweep the depths
-        width=384,  # for a fixed width
-        num_heads=1,  # fixed num_heads
-        linear_value=None,  # With and without linear values --> compare effects of them for different depths
-        to_plot="val_loss",
+    plot_metric_curves(
+        file="results/results_three.csv",
+        depth=8,
+        width=384,
+        num_heads=1,
+        linear_value=False,
+        ul2=None,
+        causal_denoisers=True,
+        randomize_denoiser_settings=True,
+        randomize_mask_width=True,
+        causal_divider=None,
+        s_divider=None,
+        r_divider=None,
+        x_divider=None,
+        to_plot="val_loss_causal",
         plot_over="epoch",
         show=True,
         loglog=False,
