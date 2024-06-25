@@ -384,7 +384,7 @@ def get_s_denoised_data(
         targets = sequence.roll(1)
         targets[:, 0] = hyp['misc']['s_denoising_token']  # will be in input -> predict in output
 
-    mask_width = mask_width or math.floor(masking_rate * sequence.shape[-1])
+    mask_width = mask_width or max(1, math.floor(masking_rate * sequence.shape[-1]))
     mask_width = min(mask_width, math.floor(masking_rate * sequence.shape[-1]))
     inputs = sequence.roll(1, dims=-1)
     inputs [:, -mask_width:] = hyp['misc']['mask_token']
@@ -445,7 +445,7 @@ def mask_spans(
 
     assert 0.0 <= masking_rate <= 1.0, "masking_rate must be between 0 and 1"
 
-    mask_width = min(mask_width, math.floor(masking_rate * sequence.shape[-1]))
+    mask_width = max(1, min(mask_width, math.floor(masking_rate * sequence.shape[-1])))
     num_masks = math.floor(masking_rate * sequence.shape[-1] / mask_width)
 
     batch_size, seq_length = sequence.shape
@@ -503,15 +503,17 @@ def randomize_with_mean(
         scale = bias / 4
         x = torch.randn(1000) * scale + bias
         x = torch.clamp(x, 0, mean*2)
-        return int(x.round()[torch.randint(0, 1000, (1,))]) if round else float(x[torch.randint(0, 1000, (1,))])
+        value = int(x.round()[torch.randint(0, 1000, (1,))]) if round else float(x[torch.randint(0, 1000, (1,))])
     elif distribution == "uniform":
         bias = mean / 2
         scale = mean
         x = torch.rand(1000) * scale + bias
         x = torch.clamp(x, 0, scale + bias)
-        return int(x.round()[torch.randint(0, 1000, (1,))]) if round else float(x[torch.randint(0, 1000, (1,))])
+        value = int(x.round()[torch.randint(0, 1000, (1,))]) if round else float(x[torch.randint(0, 1000, (1,))])
     else:
-        return mean
+        value = mean
+
+    return max(1 if round else 1.0, value)
 
 
 def choose_setting(
