@@ -732,6 +732,8 @@ def train(net: SpeedyLangNet | None = None, **settings):
         if settings['ul2']:
             if settings['randomize_denoiser_settings']:
                 run_name = "random-denoiser-settings_" + run_name
+            if settings['randomize_mask_width']:
+                run_name = "random-mask-width_" + run_name
             run_name = (
                 "loss-dividers-C-S-R-X_"
                 f"{settings['causal_divider']}-{settings['s_divider']}"
