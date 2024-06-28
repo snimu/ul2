@@ -285,45 +285,14 @@ def plot_metric_curves(
             "r_divider", "x_divider",
         ],
     )
-    print(len(settings))
 
-    if num_heads is not None:
-        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd  in settings if nh == num_heads]
-    print(len(settings))
-    if linear_value is not None:
-        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if lv == linear_value]
-    print(len(settings))
-    if depth is not None:
-        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if d == depth]
-    print(len(settings))
-    if width is not None:
-        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if w == width]
-    print(len(settings))
-    if ul2 is not None:
-        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if ul2 == ul2]
-    print(len(settings))
-    if causal_denoisers is not None:
-        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if cdn == causal_denoisers]
-    print(len(settings))
-    if randomize_denoiser_settings is not None:
-        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if rds == randomize_denoiser_settings]
-    print(len(settings))
-    if randomize_mask_width is not None:
-        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if rmw == randomize_mask_width]
-    print(len(settings))
-    if causal_divider is not None:
-        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if cd == causal_divider]
-    print(len(settings))
-    if s_divider is not None:
-        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if sd == s_divider]
-    print(len(settings))
-    if causal_denoisers is not None:
-        r_divider = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if rd == r_divider]
-    print(len(settings))
-    if x_divider is not None:
-        settings = [(nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd) for nh, lv, d, w, ul2, cdn, rds, rmw, cd, sd, rd, xd in settings if xd == x_divider]
-    print(len(settings))
-
+    for i, user_param in enumerate((
+        num_heads, linear_value, depth, width, 
+        ul2, causal_denoisers, randomize_denoiser_settings, 
+        randomize_mask_width, causal_divider, s_divider, r_divider, x_divider
+    )):
+        if user_param is not None:
+            settings = [setting for setting in settings if setting[i] == user_param]
 
     colors = generate_distinct_colors(len(settings))
 
@@ -375,6 +344,12 @@ def plot_metric_curves(
             f"num_heads={num_heads_}, linear_value={linear_value_}, "
             f"depth={depth_}, width={width_}, #params={format_num_params(num_params)}"
         )
+        if ul2_:
+            label += ", ul2"
+        if causal_denoisers_:
+            label += ", causal_denoisers"
+        if randomize_denoiser_settings_:
+            label += ", randomize_denoiser_settings"
         if loglog:
             plt.loglog(xs, avg_ys, color=color if plot_all else None, label=label)
         else:
@@ -400,15 +375,15 @@ def plot_metric_curves(
 
 if __name__ == "__main__":
     plot_metric_curves(
-        file="results/results_three.csv",
+        file="results/results_four.csv",
         depth=8,
         width=384,
         num_heads=1,
         linear_value=False,
         ul2=None,
-        causal_denoisers=True,
-        randomize_denoiser_settings=True,
-        randomize_mask_width=True,
+        causal_denoisers=None,
+        randomize_denoiser_settings=None,
+        randomize_mask_width= None,
         causal_divider=None,
         s_divider=None,
         r_divider=None,
