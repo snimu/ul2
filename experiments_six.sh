@@ -1,0 +1,2 @@
+python main.py -lw --logfile results_six1.csv --wandb_project ul2.six --model_scale 10.0 --seed 1500 --gpu_capacity_scalar 1.0 --num_runs 10 --ul2 --causal_divider 1.0 1.0 --s_divider 6.0 2.0 --r_divider 6.0 1000.0 --x_divider 6.0 1000.0  --causal_denoisers --randomize_denoiser_settings --randomize_mask_width
+python main.py -lw --logfile results_six2.csv --wandb_project ul2.six --model_scale 10.0 --seed 1500 --gpu_capacity_scalar 1.0 --num_runs 10
