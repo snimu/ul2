@@ -329,7 +329,7 @@ def make_net(settings: dict[str, Any]):
         'attn_layers': nn.ModuleList([make_attn(settings) for _ in range(settings['depth'])]),
         'norm': nn.LayerNorm(settings['width'], bias=False),
         'outputs': nn.Linear(settings['width'], total_num_tokens, bias=False),
-})
+    })
     net = SpeedyLangNet(network_dict)
     net = net.to(hyp['misc']['device'], torch.bfloat16)
     net.train()
