@@ -292,7 +292,7 @@ def plot_metric_curves(
         randomize_mask_width, causal_divider, s_divider, r_divider, x_divider
     )):
         if user_param is not None:
-            settings = [setting for setting in settings if setting[i] == user_param]
+            settings = [setting for setting in settings if setting[i] == user_param or (i>4 and setting[4] is False)]
 
     colors = generate_distinct_colors(len(settings))
 
@@ -340,16 +340,17 @@ def plot_metric_curves(
 
         ).collect()["num_params"][0]
         
-        label = (
-            f"num_heads={num_heads_}, linear_value={linear_value_}, "
-            f"depth={depth_}, width={width_}, #params={format_num_params(num_params)}"
-        )
         if ul2_:
-            label += ", ul2"
-        if causal_denoisers_:
-            label += ", causal_denoisers"
-        if randomize_denoiser_settings_:
-            label += ", randomize_denoiser_settings"
+            label = f"UL2; causal_divider={causal_divider_}, "
+            label += f"s_divider={s_divider_}, r_divider={r_divider_}, x_divider={x_divider_}"
+            if causal_denoisers_:
+                label += ", causal denoisers"
+            if randomize_denoiser_settings_:
+                label += ", random denoiser settings"
+            if randomize_mask_width_:
+                label += ", random mask width"
+        else:
+            label = "standard training"
         if loglog:
             plt.loglog(xs, avg_ys, color=color if plot_all else None, label=label)
         else:
@@ -363,7 +364,7 @@ def plot_metric_curves(
     plt.ylabel(to_plot)
     plt.legend()
     plt.grid()
-    plt.title(f"{to_plot} vs {plot_over}")
+    plt.title(f"{to_plot} vs {plot_over} ({format_num_params(num_params)}; depth: {depth_}, width: {width_})")
     plt.tight_layout()
     if show:
         plt.show()
@@ -375,19 +376,19 @@ def plot_metric_curves(
 
 if __name__ == "__main__":
     plot_metric_curves(
-        file="results/results_four.csv",
-        depth=8,
-        width=384,
+        file="results/results_five.csv",
+        depth=21,
+        width=1024,
         num_heads=1,
         linear_value=False,
         ul2=None,
         causal_denoisers=None,
-        randomize_denoiser_settings=None,
-        randomize_mask_width= None,
-        causal_divider=None,
-        s_divider=None,
-        r_divider=None,
-        x_divider=None,
+        randomize_denoiser_settings=True,
+        randomize_mask_width= True,
+        causal_divider=1.0,
+        s_divider=6.0,
+        r_divider=6.0,
+        x_divider=6.0,
         to_plot="val_loss_causal",
         plot_over="epoch",
         show=True,
