@@ -30,6 +30,8 @@ import torch.nn.functional as F
 from torch import nn
 import polars as pl
 import wandb
+import safetensors
+import safetensors.torch
 
 # This seems like one of the best choices right now for a fast/lightweight/simple tokenizer.
 import tiktoken
@@ -728,28 +730,11 @@ def train(net: SpeedyLangNet | None = None, **settings):
 
     # Init wandb 
     if settings['log_wandb']:
-        run_name = f"depth_{settings['depth']}_width_{settings['width']}_seed_{settings['seed']}"
-        if settings['ul2']:
-            if settings['randomize_denoiser_settings']:
-                run_name = "random-denoiser-settings_" + run_name
-            if settings['randomize_mask_width']:
-                run_name = "random-mask-width_" + run_name
-            run_name = (
-                "loss-dividers-C-S-R-X_"
-                f"{settings['causal_divider']}-{settings['s_divider']}"
-                f"-{settings['r_divider']}-{settings['x_divider']}_"
-            ) + run_name
-
-            if settings['causal_denoisers']:
-                run_name = "ul2-causal_" + run_name 
-            else: 
-                run_name = "ul2_" + run_name
-
         wandb.finish()  # Finish any previous runs
         wandb.init(
             project=settings['wandb_project'], 
             config=settings,
-            name=run_name,
+            name=settings['run_name'],
         )
 
     # Full-run statistics variables
@@ -1067,6 +1052,14 @@ def get_args() -> argparse.Namespace:
         "TYPE: str; DEFAULT: 'speedy-lang'"
     )
 
+    # Model saving
+    parser.add_argument(
+        "-s", "--save_model",
+        action="store_true",
+        help="If this flag is set, each trained model will be saved as a .safetensors file "
+        "after training. Naming is automatic. FLAG"
+    )
+
     # How many runs per setting, how many steps/epochs/tokens to train/validate for per run
     parser.add_argument(
         "--num_runs", 
@@ -1327,6 +1320,27 @@ def print_settings(settings: list[tuple], names: list[str] = None):
         print(f"Setting {i+1}/{len(settings)}:\n{named_settings}\n\n")
 
 
+def make_run_name(**settings):
+    run_name = f"depth_{settings['depth']}_width_{settings['width']}_seed_{settings['seed']}"
+    if settings['ul2']:
+        if settings['randomize_denoiser_settings']:
+            run_name = "random-denoiser-settings_" + run_name
+        if settings['randomize_mask_width']:
+            run_name = "random-mask-width_" + run_name
+        run_name = (
+            "loss-dividers-C-S-R-X_"
+            f"{settings['causal_divider']}-{settings['s_divider']}"
+            f"-{settings['r_divider']}-{settings['x_divider']}_"
+        ) + run_name
+
+        if settings['causal_denoisers']:
+            run_name = "ul2-causal_" + run_name 
+        else: 
+            run_name = "ul2_" + run_name
+
+    return run_name
+
+
 def main():
     args = get_args()
     settings = get_settings(args)
@@ -1384,6 +1398,20 @@ def main():
             title = "\n\n" + "\n".join([sep, title, sep]) + "\n\n"
             print(title)
 
+            run_name = make_run_name(
+                depth=depth,
+                width=width,
+                seed=seed,
+                ul2=args.ul2,
+                causal_denoisers=args.causal_denoisers,
+                causal_divider=causal_divider,
+                s_divider=s_divider,
+                r_divider=r_divider,
+                x_divider=x_divider,
+                randomize_denoiser_settings=args.randomize_denoiser_settings,
+                randomize_mask_width=args.randomize_mask_width,
+            )
+
             # Seed
             torch.manual_seed(seed)
             random.seed(seed)
@@ -1427,9 +1455,21 @@ def main():
                 x_divider=x_divider,
                 randomize_denoiser_settings=args.randomize_denoiser_settings,
                 randomize_mask_width=args.randomize_mask_width,
+                run_name=run_name
             )
 
-            # You can do whatever you want with your net here; I delete it to save VRAM
+            if args.save_net:
+                safetensors.torch.save_model(
+                    model=net,
+                    filename=run_name + ".safetensors",
+                    metadata={
+                        "width": str(width),
+                        "depth": str(depth),
+                        "num_heads": str(num_heads),
+                        "linear_value": str(linear_value),
+                        "max_sequence_length": str(max_sequence_length),
+                    }
+                )
             del net 
 
             # Save results

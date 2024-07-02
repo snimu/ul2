@@ -6,3 +6,4 @@ rich
 polars
 pandas
 wandb
+safetensors
