@@ -18,6 +18,7 @@ from typing import Any, Literal
 from functools import partial
 import subprocess
 import random
+import json
 
 import zipfile
 import math
@@ -823,11 +824,17 @@ def train(net: SpeedyLangNet | None = None, **settings):
 
     stop_run = False
 
+    s_denoising = settings['ul2'] and settings['s_divider'] <= 10.0
+    r_denoising = settings['ul2'] and settings['r_divider'] <= 10.0
+    x_denoising = settings['ul2'] and settings['x_divider'] <= 10.0
+    causal_pred = settings['causal_divider'] <= 10.0
+    
+
     # Main loop. Most of the complexity here is in the dynamic growing scheduler(s).
     while True:
         sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
 
-        if settings['ul2']:
+        if s_denoising:
             inputs, targets = get_s_denoised_data(
                 sequence, 
                 mask_width=None, 
@@ -840,8 +847,11 @@ def train(net: SpeedyLangNet | None = None, **settings):
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 's_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["s_divider"]  # 6.
-            loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
+            loss.div(discrete_sampled_microbatch_steps).backward(
+                retain_graph=any([r_denoising, x_denoising, causal_pred])
+            )
 
+        if r_denoising:
             inputs, targets = get_r_denoised_data(
                 sequence, 
                 **choose_setting(
@@ -853,8 +863,11 @@ def train(net: SpeedyLangNet | None = None, **settings):
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'r_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["r_divider"]  # 6.
-            loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
+            loss.div(discrete_sampled_microbatch_steps).backward(
+                retain_graph=any([x_denoising, causal_pred])
+            )
 
+        if x_denoising:
             inputs, targets = get_x_denoised_data(
                 sequence,
                 **choose_setting(
@@ -866,11 +879,14 @@ def train(net: SpeedyLangNet | None = None, **settings):
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'x_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["x_divider"]  # 6.
-            loss.div(discrete_sampled_microbatch_steps).backward(retain_graph=True)
-        
-        inputs, targets = get_causal_data(sequence)
-        outputs = net(inputs, mode='causal')
-        loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) * settings["causal_divider"]  # (0.5 if settings['ul2'] else 1.)
+            loss.div(discrete_sampled_microbatch_steps).backward(
+                retain_graph=causal_pred
+            )
+
+        if causal_pred:        
+            inputs, targets = get_causal_data(sequence)
+            outputs = net(inputs, mode='causal')
+            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["causal_divider"]  # (0.5 if settings['ul2'] else 1.)
 
         loss.div(discrete_sampled_microbatch_steps).backward()
         tokens_seen += curr_batchsize * curr_length
@@ -1462,14 +1478,18 @@ def main():
                 safetensors.torch.save_model(
                     model=net,
                     filename=run_name + ".safetensors",
-                    metadata={
-                        "width": str(width),
-                        "depth": str(depth),
-                        "num_heads": str(num_heads),
-                        "linear_value": str(linear_value),
-                        "max_sequence_length": str(max_sequence_length),
-                    }
                 )
+                metadata = {
+                    "width": str(width),
+                    "depth": str(depth),
+                    "num_heads": str(num_heads),
+                    "linear_value": str(linear_value),
+                    "max_sequence_length": str(max_sequence_length),
+                    "num_tokens": hyp['misc']['num_tokens']+hyp['misc']['num_special_tokens'],
+                }
+                with open(run_name + ".metadata.json", "w") as f:
+                    f.write(json.dumps(metadata))
+
             del net 
 
             # Save results
