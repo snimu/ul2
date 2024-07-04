@@ -6,6 +6,8 @@ import colorsys
 import matplotlib.pyplot as plt
 import polars as pl
 import numpy as np
+from rich import print
+import rich.table
 
 
 def close_plt() -> None:
@@ -62,7 +64,7 @@ def load_xs_ys_avg_y(
         s_divider: float | None = None,
         r_divider: float | None = None,
         x_divider: float | None = None,
-        to_plot: Literal["val_loss", "train_losses", "val_accs", "train_accs", "val_pplxs", "train_pplxs"] = "val_loss",
+        to_plot: Literal["val_loss", "train_losses", "val_accs", "train_accs", "val_pplxs", "train_pplxs"] = "val_loss_causal",
         plot_over: Literal["step", "epoch", "token", "time_sec"] = "step",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Load x, y, and average y from a CSV file."""
@@ -374,24 +376,139 @@ def plot_metric_curves(
     close_plt()  # in case you call this function multiple times with different settings
 
 
+def count_mean_of_n_best_values(
+        file: str,
+        n: int,
+        best: Literal["min", "max"] = "min",
+        ul2: bool | None = None,
+        causal_denoisers: bool | None = None,
+        randomize_denoiser_settings: bool | None = None,
+        randomize_mask_width: bool | None = None,
+        causal_divider: float | None = None,
+        s_divider: float | None = None,
+        r_divider: float | None = None,
+        x_divider: float | None = None,
+        to_plot: Literal["val_loss", "train_losses", "val_accs", "train_accs", "val_pplxs"] = "val_loss_causal",
+        plot_over: Literal["step", "epoch", "token", "time_sec"] = "epoch",
+): 
+    settings = get_unique_settings(
+        file,
+        [
+            "ul2", "causal_denoisers", "randomize_denoiser_settings",
+            "randomize_mask_width", "causal_divider", "s_divider",
+            "r_divider", "x_divider",
+        ],
+    )
+
+    for i, user_param in enumerate((
+        ul2, causal_denoisers, randomize_denoiser_settings, 
+        randomize_mask_width, causal_divider, s_divider, r_divider, x_divider
+    )):
+        if user_param is not None:
+            settings = [setting for setting in settings if setting[i] == user_param or (i>0 and setting[0] is False)]
+
+    results = {
+        "ul2": [],
+        "causal_denoisers": [],
+        "randomize_denoiser_settings": [],
+        "randomize_mask_width": [],
+        "causal_divider": [],
+        "s_divider": [],
+        "r_divider": [],
+        "x_divider": [],
+        "best_n_mean": [],
+    }
+    for i, (
+        ul2_, causal_denoisers_, randomize_denoiser_settings_,
+        randomize_mask_width_, causal_divider_, s_divider_,
+        r_divider_, x_divider_,
+    ) in enumerate(settings):
+        xs, _, avg_ys = load_xs_ys_avg_y(
+            file,
+            ul2=ul2_,
+            causal_denoisers=causal_denoisers_,
+            randomize_denoiser_settings=randomize_denoiser_settings_,
+            randomize_mask_width=randomize_mask_width_,
+            causal_divider=causal_divider_,
+            s_divider=s_divider_,
+            r_divider=r_divider_,
+            x_divider=x_divider_,
+            to_plot=to_plot,
+            plot_over=plot_over,
+        )
+        if best == "min":
+            best_n_mean = np.mean(np.sort(avg_ys)[:n])
+        else:
+            best_n_mean = np.mean(np.sort(avg_ys)[-n:])
+
+        results["ul2"].append(ul2_)
+        results["causal_denoisers"].append(causal_denoisers_)
+        results["randomize_denoiser_settings"].append(randomize_denoiser_settings_)
+        results["randomize_mask_width"].append(randomize_mask_width_)
+        results["causal_divider"].append(causal_divider_)
+        results["s_divider"].append(s_divider_)
+        results["r_divider"].append(r_divider_)
+        results["x_divider"].append(x_divider_)
+        results["best_n_mean"].append(best_n_mean)
+
+    results = pl.DataFrame(results).sort(by="best_n_mean")
+    table = rich.table.Table(
+        "ul2", "causal_denoisers", "randomize_denoiser_settings", "randomize_mask_width", 
+        "causal_divider", "s_divider", "r_divider", "x_divider", "best_n_mean",
+    )
+    for i in range(len(results)):
+        table.add_row(
+            str(results["ul2"][i]),
+            str(results["causal_denoisers"][i]),
+            str(results["randomize_denoiser_settings"][i]),
+            str(results["randomize_mask_width"][i]),
+            str(results["causal_divider"][i]),
+            str(results["s_divider"][i]),
+            str(results["r_divider"][i]),
+            str(results["x_divider"][i]),
+            f"{results['best_n_mean'][i]:.4f}",
+        )
+
+    print(table)
+
+
 if __name__ == "__main__":
-    plot_metric_curves(
-        file="results/results_five.csv",
-        depth=21,
-        width=1024,
-        num_heads=1,
-        linear_value=False,
+    results_five = "results/results_five.csv"
+    # plot_metric_curves(
+    #     file=results_five,
+    #     depth=21,
+    #     width=1024,
+    #     num_heads=1,
+    #     linear_value=False,
+    #     ul2=None,
+    #     causal_denoisers=None,
+    #     randomize_denoiser_settings=True,
+    #     randomize_mask_width= True,
+    #     causal_divider=1.0,
+    #     s_divider=6.0,
+    #     r_divider=6.0,
+    #     x_divider=6.0,
+    #     to_plot="val_loss_causal",
+    #     plot_over="epoch",
+    #     show=True,
+    #     loglog=False,
+    #     plot_all=False,
+    # )
+
+    count_mean_of_n_best_values(
+        file=results_five,
+        n=5,
+        best="min",
         ul2=None,
         causal_denoisers=None,
-        randomize_denoiser_settings=True,
-        randomize_mask_width= True,
-        causal_divider=1.0,
-        s_divider=6.0,
-        r_divider=6.0,
-        x_divider=6.0,
+        randomize_denoiser_settings=None,
+        randomize_mask_width=None,
+        causal_divider=None,
+        s_divider=None,
+        r_divider=None,
+        x_divider=None,
         to_plot="val_loss_causal",
         plot_over="epoch",
-        show=True,
-        loglog=False,
-        plot_all=False,
     )
+
+    # TODO: I fucked up and did *causal_divider, not /causal_divider...
