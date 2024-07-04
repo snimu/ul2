@@ -862,7 +862,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 causal=settings['causal_denoisers'],
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'r_denoising')
-            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["r_divider"]  # 6.
+            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["r_divider"]
             loss.div(discrete_sampled_microbatch_steps).backward(
                 retain_graph=any([x_denoising, causal_pred])
             )
@@ -878,7 +878,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 causal=settings['causal_denoisers'],
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'x_denoising')
-            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["x_divider"]  # 6.
+            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["x_divider"]
             loss.div(discrete_sampled_microbatch_steps).backward(
                 retain_graph=causal_pred
             )
@@ -886,9 +886,9 @@ def train(net: SpeedyLangNet | None = None, **settings):
         if causal_pred:        
             inputs, targets = get_causal_data(sequence)
             outputs = net(inputs, mode='causal')
-            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["causal_divider"]  # (0.5 if settings['ul2'] else 1.)
+            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["causal_divider"]
+            loss.div(discrete_sampled_microbatch_steps).backward()
 
-        loss.div(discrete_sampled_microbatch_steps).backward()
         tokens_seen += curr_batchsize * curr_length
         epoch = tokens_seen/len(data['train'])
 
