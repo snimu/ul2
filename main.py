@@ -1239,6 +1239,12 @@ def get_args() -> argparse.Namespace:
         "with a mean value of the preset mask-width. "
         "FLAG"
     )
+    parser.add_argument(
+        "--save_net",
+        action="store_true",
+        help="If set, will save the network after training. "
+        "FLAG"
+    )
 
     # PARSE ARGS
     args = parser.parse_args()
