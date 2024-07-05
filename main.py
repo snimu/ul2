@@ -359,13 +359,15 @@ def get_batch(data_dict, key, batchsize, length):
 
 
 @torch.no_grad()
-def get_causal_data(sequence: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def get_causal_data(
+        sequence: torch.Tensor, no_special_tokens: bool = False
+) -> tuple[torch.Tensor, torch.Tensor]:
     targets  = sequence
 
     # Inputs: add special token to beginning
     # Just roll the tensor and replace the first (previously final) token to get the causality going
     inputs = sequence.roll(1, dims=-1)
-    inputs[:, 0] = hyp['misc']['causal_token']
+    inputs[:, 0] = hyp['misc']['mask_token'] if no_special_tokens else hyp['misc']['causal_token']
 
     return inputs, targets
 
@@ -376,6 +378,7 @@ def get_s_denoised_data(
         mask_width: int | None,
         masking_rate: float = 0.5,
         causal: bool = False,
+        no_special_tokens = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if causal:
         targets = torch.zeros_like(
@@ -391,7 +394,7 @@ def get_s_denoised_data(
     mask_width = min(mask_width, math.floor(masking_rate * sequence.shape[-1]))
     inputs = sequence.roll(1, dims=-1)
     inputs [:, -mask_width:] = hyp['misc']['mask_token']
-    inputs[:, 0] = hyp['misc']['s_denoising_token']
+    inputs[:, 0] = hyp['misc']['mask_token'] if no_special_tokens else hyp['misc']['s_denoising_token']
 
     return inputs, targets
 
@@ -402,12 +405,13 @@ def get_r_denoised_data(
         mask_width: int | None,
         masking_rate: float,
         causal: bool = False,
+        no_special_tokens: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     return mask_spans(
         sequence=sequence, 
         mask_width=mask_width, 
         masking_rate=masking_rate,
-        mode_token=hyp['misc']['r_denoising_token'],
+        mode_token=hyp['misc']['mask_token'] if no_special_tokens else hyp['misc']['r_denoising_token'],
         causal=causal,
     )
 
@@ -418,12 +422,13 @@ def get_x_denoised_data(
         mask_width: int | None,
         masking_rate: float,
         causal: bool = False,
+        no_special_tokens: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     return mask_spans(
         sequence=sequence, 
         mask_width=mask_width, 
         masking_rate=masking_rate,
-        mode_token=hyp['misc']['x_denoising_token'],
+        mode_token=hyp['misc']['mask_token'] if no_special_tokens else hyp['misc']['x_denoising_token'],
         causal=causal,
     )
 
@@ -669,7 +674,7 @@ def calc_pplx(loss: torch.Tensor | float) -> torch.Tensor | float:
     return 2.71828 ** loss
 
 
-def eval(net, causal_denoisers: bool = False):
+def eval(net, causal_denoisers: bool = False, no_special_tokens: bool = False):
     ####################
     # Evaluation  Mode #
     ####################
@@ -690,20 +695,38 @@ def eval(net, causal_denoisers: bool = False):
         for _ in range(num_eval_steps):
             sequence = get_batch(data, key='eval', batchsize=eval_batchsize, length=hyp['misc']['sequence_length']['max'])
             
-            inputs, targets = get_causal_data(sequence)
+            inputs, targets = get_causal_data(sequence, no_special_tokens=no_special_tokens)
             outputs = net(inputs, mode='causal')
             val_loss += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
             val_acc  += 1./num_eval_steps * (outputs.argmax(-1) == targets).float().mean()
 
-            inputs, targets = get_s_denoised_data(sequence, mask_width=None, masking_rate=0.25, causal=causal_denoisers)
+            inputs, targets = get_s_denoised_data(
+                sequence, 
+                mask_width=None, 
+                masking_rate=0.25, 
+                causal=causal_denoisers,
+                no_special_tokens=no_special_tokens,
+            )
             outputs = net(inputs, mode='causal' if causal_denoisers else 's_denoising')
             val_loss_s += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
 
-            inputs, targets = get_r_denoised_data(sequence, mask_width=3, masking_rate=0.15, causal=causal_denoisers)
+            inputs, targets = get_r_denoised_data(
+                sequence, 
+                mask_width=3, 
+                masking_rate=0.15, 
+                causal=causal_denoisers,
+                no_special_tokens=no_special_tokens,
+            )
             outputs = net(inputs, mode='causal' if causal_denoisers else 'r_denoising')
             val_loss_r += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
 
-            inputs, targets = get_x_denoised_data(sequence, mask_width=8, masking_rate=0.5, causal=causal_denoisers)
+            inputs, targets = get_x_denoised_data(
+                sequence, 
+                mask_width=8, 
+                masking_rate=0.5, 
+                causal=causal_denoisers,
+                no_special_tokens=no_special_tokens,
+            )
             outputs = net(inputs, mode='causal' if causal_denoisers else 'x_denoising')
             val_loss_x += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
 
@@ -844,6 +867,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                     mask_width_randomization_method='uniform' if settings['randomize_mask_width'] else 'noop',
                 ),
                 causal=settings['causal_denoisers'],
+                no_special_tokens=settings['no_special_tokens'],
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 's_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["s_divider"]  # 6.
@@ -860,6 +884,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                     mask_width_randomization_method='gaussian' if settings['randomize_mask_width'] else 'noop',
                 ), 
                 causal=settings['causal_denoisers'],
+                no_special_tokens=settings['no_special_tokens'],
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'r_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["r_divider"]
@@ -876,6 +901,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                     mask_width_randomization_method='gaussian' if settings['randomize_mask_width'] else 'noop',
                 ), 
                 causal=settings['causal_denoisers'],
+                no_special_tokens=settings['no_special_tokens'],
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'x_denoising')
             loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["x_divider"]
@@ -975,7 +1001,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 val_loss_s, val_pplx_s,
                 val_loss_r, val_pplx_r,
                 val_loss_x, val_pplx_x,
-            ) = eval(net)
+            ) = eval(net, causal_denoisers=settings['causal_denoisers'], no_special_tokens=settings['no_special_tokens'])
 
             val_losses_causal.append(val_loss_causal)
             val_losses_s.append(val_loss_s)
@@ -1245,6 +1271,12 @@ def get_args() -> argparse.Namespace:
         help="If set, will save the network after training. "
         "FLAG"
     )
+    parser.add_argument(
+        "--no_special_tokens",
+        action="store_true",
+        help="If set, will use the mask token instead of task-specific "
+        "special tokens in the beginning of a sequence. FLAG"
+    )
 
     # PARSE ARGS
     args = parser.parse_args()
@@ -1372,7 +1404,7 @@ def main():
             settings, names=[
                 "model_scale", "depth", "width", "num_heads", "linear_value",
                 "ul2", "causal_denoisers", "causal_divider", "s_divider", "r_divider", "x_divider",
-                "randomize_denoiser_settings", "randomize_mask_width",
+                "randomize_denoiser_settings", "randomize_mask_width", "save_net", "no_special_tokens"
             ]
         )
         proceed = input("Proceed? [y/n] ")
@@ -1413,6 +1445,8 @@ def main():
                 f"\n:::    {x_divider=}"
                 f"\n:::    randomize_denoiser_settings={args.randomize_denoiser_settings}"
                 f"\n:::    randomize_mask_width={args.randomize_mask_width}"
+                f"\n:::    save_net={args.save_net}"
+                f"\n:::    no_special_tokens={args.no_special_tokens}"
             )
             max_len = max(len(line) for line in title.split("\n"))
             title = "\n".join([line + " " * (max_len - len(line)) + " :::" for line in title.split("\n")])
@@ -1477,7 +1511,8 @@ def main():
                 x_divider=x_divider,
                 randomize_denoiser_settings=args.randomize_denoiser_settings,
                 randomize_mask_width=args.randomize_mask_width,
-                run_name=run_name
+                run_name=run_name,
+                no_special_tokens=args.no_special_tokens,
             )
 
             if args.save_net:
@@ -1509,6 +1544,7 @@ def main():
                 "x_divider": [x_divider],
                 "randomize_denoiser_settings": [args.randomize_denoiser_settings],
                 "randomize_mask_width": [args.randomize_mask_width],
+                "no_special_tokens": [args.no_special_tokens],
                 "model_scale": [model_scale],
                 "depth": [hyp['net']['num_blocks']],
                 "width": [hyp['net']['residual_depth']],
