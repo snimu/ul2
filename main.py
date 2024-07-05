@@ -857,6 +857,8 @@ def train(net: SpeedyLangNet | None = None, **settings):
     while True:
         sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
 
+
+        loss = 0.0
         if s_denoising:
             inputs, targets = get_s_denoised_data(
                 sequence, 
@@ -870,10 +872,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 no_special_tokens=settings['no_special_tokens'],
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 's_denoising')
-            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["s_divider"]  # 6.
-            loss.div(discrete_sampled_microbatch_steps).backward(
-                retain_graph=any([r_denoising, x_denoising, causal_pred])
-            )
+            loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["s_divider"]
 
         if r_denoising:
             inputs, targets = get_r_denoised_data(
@@ -887,10 +886,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 no_special_tokens=settings['no_special_tokens'],
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'r_denoising')
-            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["r_divider"]
-            loss.div(discrete_sampled_microbatch_steps).backward(
-                retain_graph=any([x_denoising, causal_pred])
-            )
+            loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["r_divider"]
 
         if x_denoising:
             inputs, targets = get_x_denoised_data(
@@ -904,17 +900,14 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 no_special_tokens=settings['no_special_tokens'],
             )
             outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'x_denoising')
-            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["x_divider"]
-            loss.div(discrete_sampled_microbatch_steps).backward(
-                retain_graph=causal_pred
-            )
+            loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["x_divider"]
 
         if causal_pred:        
             inputs, targets = get_causal_data(sequence)
             outputs = net(inputs, mode='causal')
-            loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["causal_divider"]
-            loss.div(discrete_sampled_microbatch_steps).backward()
-
+            loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["causal_divider"]
+        
+        loss.div(discrete_sampled_microbatch_steps).backward()
         tokens_seen += curr_batchsize * curr_length
         epoch = tokens_seen/len(data['train'])
 
