@@ -857,14 +857,13 @@ def train(net: SpeedyLangNet | None = None, **settings):
     while True:
         sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
 
-
         loss = 0.0
         if s_denoising:
             inputs, targets = get_s_denoised_data(
                 sequence, 
                 mask_width=None, 
                 **choose_setting(
-                    's',
+                    denoiser='s',
                     randomize_choice=settings['randomize_denoiser_settings'],
                     mask_width_randomization_method='uniform' if settings['randomize_mask_width'] else 'noop',
                 ),
@@ -878,7 +877,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
             inputs, targets = get_r_denoised_data(
                 sequence, 
                 **choose_setting(
-                    'r',
+                    denoiser='r',
                     randomize_choice=settings['randomize_denoiser_settings'],
                     mask_width_randomization_method='gaussian' if settings['randomize_mask_width'] else 'noop',
                 ), 
@@ -892,7 +891,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
             inputs, targets = get_x_denoised_data(
                 sequence,
                 **choose_setting(
-                    'x',
+                    denoiser='x',
                     randomize_choice=settings['randomize_denoiser_settings'],
                     mask_width_randomization_method='gaussian' if settings['randomize_mask_width'] else 'noop',
                 ), 
