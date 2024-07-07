@@ -847,15 +847,57 @@ def train(net: SpeedyLangNet | None = None, **settings):
 
     stop_run = False
 
-    s_denoising = settings['ul2'] and settings['s_divider'] <= 10.0
-    r_denoising = settings['ul2'] and settings['r_divider'] <= 10.0
-    x_denoising = settings['ul2'] and settings['x_divider'] <= 10.0
-    causal_pred = settings['causal_divider'] <= 10.0
+    s_denoising_enabled = settings['ul2'] and settings['s_divider'] <= 10.0
+    r_denoising_enabled = settings['ul2'] and settings['r_divider'] <= 10.0
+    x_denoising_enabled = settings['ul2'] and settings['x_divider'] <= 10.0
+    causal_pred_enabled = settings['causal_divider'] <= 10.0
     
+    iteration = 0
+    modulo_every = sum([int(d) for d in [s_denoising_enabled, r_denoising_enabled, x_denoising_enabled, causal_pred_enabled]])
 
     # Main loop. Most of the complexity here is in the dynamic growing scheduler(s).
     while True:
         sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
+
+        s_denoising = (
+            s_denoising_enabled 
+            and (
+                (iteration % modulo_every == 0) 
+                if settings['alternate_denoisers'] 
+                else True
+            )
+        )
+        r_denoising = (
+            r_denoising_enabled 
+            and (
+                (iteration % modulo_every == int(s_denoising_enabled))
+                if settings['alternate_denoisers'] 
+                else True
+            )
+        )
+        x_denoising = (
+            x_denoising_enabled 
+            and (
+                (iteration % modulo_every == int(s_denoising_enabled) + int(r_denoising_enabled)) 
+                if settings['alternate_denoisers'] 
+                else True
+            )
+        )
+        causal_pred = (
+            causal_pred_enabled 
+            and (
+                (iteration % modulo_every == (
+                    int(s_denoising_enabled) 
+                    + int(r_denoising_enabled) 
+                    + int(x_denoising_enabled))
+                )
+                if settings['alternate_denoisers'] 
+                else True
+            )
+        )
+
+        iteration += 1
+        iteration = iteration % modulo_every
 
         loss = 0.0
         if s_denoising:
@@ -1269,6 +1311,12 @@ def get_args() -> argparse.Namespace:
         help="If set, will use the mask token instead of task-specific "
         "special tokens in the beginning of a sequence. FLAG"
     )
+    parser.add_argument(
+        "--alternate_denoisers",
+        action="store_true",
+        help="If set, will alternate between the different denoisers "
+        "that are enabled every step. FLAG"
+    )
 
     # PARSE ARGS
     args = parser.parse_args()
@@ -1373,6 +1421,10 @@ def make_run_name(**settings):
             run_name = "random-denoiser-settings_" + run_name
         if settings['randomize_mask_width']:
             run_name = "random-mask-width_" + run_name
+        if settings['no_special_tokens']:
+            run_name = "no-special-tokens_" + run_name
+        if settings['alternate_denoisers']:
+            run_name = "alternate-denoisers_" + run_name
         run_name = (
             "loss-dividers-C-S-R-X_"
             f"{settings['causal_divider']}-{settings['s_divider']}"
@@ -1396,7 +1448,8 @@ def main():
             settings, names=[
                 "model_scale", "depth", "width", "num_heads", "linear_value",
                 "ul2", "causal_denoisers", "causal_divider", "s_divider", "r_divider", "x_divider",
-                "randomize_denoiser_settings", "randomize_mask_width", "save_net", "no_special_tokens"
+                "randomize_denoiser_settings", "randomize_mask_width", "save_net", "no_special_tokens",
+                "alternate_denoisers",
             ]
         )
         proceed = input("Proceed? [y/n] ")
@@ -1439,6 +1492,7 @@ def main():
                 f"\n:::    randomize_mask_width={args.randomize_mask_width}"
                 f"\n:::    save_net={args.save_net}"
                 f"\n:::    no_special_tokens={args.no_special_tokens}"
+                f"\n:::    alternate_denoisers={args.alternate_denoisers}"
             )
             max_len = max(len(line) for line in title.split("\n"))
             title = "\n".join([line + " " * (max_len - len(line)) + " :::" for line in title.split("\n")])
@@ -1458,6 +1512,8 @@ def main():
                 x_divider=x_divider,
                 randomize_denoiser_settings=args.randomize_denoiser_settings,
                 randomize_mask_width=args.randomize_mask_width,
+                no_special_tokens=args.no_special_tokens,
+                alternate_denoisers=args.alternate_denoisers,
             )
 
             # Seed
@@ -1505,6 +1561,7 @@ def main():
                 randomize_mask_width=args.randomize_mask_width,
                 run_name=run_name,
                 no_special_tokens=args.no_special_tokens,
+                alternate_denoisers=args.alternate_denoisers,
             )
 
             if args.save_net:
@@ -1537,6 +1594,7 @@ def main():
                 "randomize_denoiser_settings": [args.randomize_denoiser_settings],
                 "randomize_mask_width": [args.randomize_mask_width],
                 "no_special_tokens": [args.no_special_tokens],
+                "alternate_denoisers": [args.alternate_denoisers],
                 "model_scale": [model_scale],
                 "depth": [hyp['net']['num_blocks']],
                 "width": [hyp['net']['residual_depth']],
