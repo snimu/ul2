@@ -8,6 +8,8 @@ import polars as pl
 import numpy as np
 from rich import print
 import rich.table
+import rich.text
+import rich.style
 
 
 def close_plt() -> None:
@@ -60,6 +62,8 @@ def load_xs_ys_avg_y(
         causal_denoisers: bool | None = None,
         randomize_denoiser_settings: bool | None = None,
         randomize_mask_width: bool | None = None,
+        no_special_tokens: bool | None = None,
+        alternate_denoisers: bool | None = None,
         causal_divider: float | None = None,
         s_divider: float | None = None,
         r_divider: float | None = None,
@@ -94,6 +98,10 @@ def load_xs_ys_avg_y(
         filters &= (pl.col("randomize_denoiser_settings") == randomize_denoiser_settings)
     if randomize_mask_width is not None:
         filters &= (pl.col("randomize_mask_width") == randomize_mask_width)
+    if no_special_tokens is not None:
+        filters &= (pl.col("no_special_tokens") == no_special_tokens)
+    if alternate_denoisers is not None:
+        filters &= (pl.col("alternate_denoisers") == alternate_denoisers)
     if causal_divider is not None:
         filters &= (pl.col("causal_divider") == causal_divider)
     if s_divider is not None:
@@ -268,6 +276,8 @@ def plot_metric_curves(
         causal_denoisers: bool | None = None,
         randomize_denoiser_settings: bool | None = None,
         randomize_mask_width: bool | None = None,
+        no_special_tokens: bool | None = None,
+        alternate_denoisers: bool | None = None,
         causal_divider: float | None = None,
         s_divider: float | None = None,
         r_divider: float | None = None,
@@ -284,14 +294,15 @@ def plot_metric_curves(
             "num_heads", "linear_value", "depth", "width",
             "ul2", "causal_denoisers", "randomize_denoiser_settings",
             "randomize_mask_width", "causal_divider", "s_divider",
-            "r_divider", "x_divider",
+            "r_divider", "x_divider", "no_special_tokens", "alternate_denoisers",
         ],
     )
 
     for i, user_param in enumerate((
         num_heads, linear_value, depth, width, 
         ul2, causal_denoisers, randomize_denoiser_settings, 
-        randomize_mask_width, causal_divider, s_divider, r_divider, x_divider
+        randomize_mask_width, causal_divider, s_divider, r_divider, x_divider,
+        no_special_tokens, alternate_denoisers,
     )):
         if user_param is not None:
             settings = [setting for setting in settings if setting[i] == user_param or (i>4 and setting[4] is False)]
@@ -302,6 +313,7 @@ def plot_metric_curves(
             num_heads_, linear_value_, depth_, width_,
             ul2_, causal_denoisers_, randomize_denoiser_settings_, randomize_mask_width_,
             causal_divider_, s_divider_, r_divider_, x_divider_,
+            no_special_tokens_, alternate_denoisers_,
     ) in zip(colors, settings):
         xs, ys, avg_ys = load_xs_ys_avg_y(
             file,
@@ -313,6 +325,8 @@ def plot_metric_curves(
             causal_denoisers=causal_denoisers_,
             randomize_denoiser_settings=randomize_denoiser_settings_,
             randomize_mask_width=randomize_mask_width_,
+            no_special_tokens=no_special_tokens_,
+            alternate_denoisers=alternate_denoisers_,
             causal_divider=causal_divider_,
             s_divider=s_divider_,
             r_divider=r_divider_,
@@ -336,6 +350,8 @@ def plot_metric_curves(
             & (pl.col("randomize_denoiser_settings") == randomize_denoiser_settings_)
             & (pl.col("randomize_mask_width") == randomize_mask_width_)
             & (pl.col("causal_divider") == causal_divider_)
+            & (pl.col("no_special_tokens") == no_special_tokens_)
+            & (pl.col("alternate_denoisers") == alternate_denoisers_)
             & (pl.col("s_divider") == s_divider_)
             & (pl.col("r_divider") == r_divider_)
             & (pl.col("x_divider") == x_divider_)
@@ -351,6 +367,10 @@ def plot_metric_curves(
                 label += ", random denoiser settings"
             if randomize_mask_width_:
                 label += ", random mask width"
+            if no_special_tokens_:
+                label += ", no special tokens"
+            if alternate_denoisers_:
+                label += ", alternate denoisers"
         else:
             label = "standard training"
         if loglog:
@@ -381,9 +401,15 @@ def count_mean_of_n_best_values(
         n: int,
         best: Literal["min", "max"] = "min",
         ul2: bool | None = None,
+        depth: int | None = None,
+        width: int | None = None,
+        num_heads: int | None = None,
+        linear_value: bool | None = False,
         causal_denoisers: bool | None = None,
         randomize_denoiser_settings: bool | None = None,
         randomize_mask_width: bool | None = None,
+        no_special_tokens: bool | None = None,
+        alternate_denoisers: bool | None = None,
         causal_divider: float | None = None,
         s_divider: float | None = None,
         r_divider: float | None = None,
@@ -394,41 +420,78 @@ def count_mean_of_n_best_values(
     settings = get_unique_settings(
         file,
         [
+            "num_heads", "linear_value", "depth", "width",
             "ul2", "causal_denoisers", "randomize_denoiser_settings",
             "randomize_mask_width", "causal_divider", "s_divider",
-            "r_divider", "x_divider",
+            "r_divider", "x_divider", "no_special_tokens", "alternate_denoisers",
         ],
     )
 
     for i, user_param in enumerate((
+        num_heads, linear_value, depth, width, 
         ul2, causal_denoisers, randomize_denoiser_settings, 
-        randomize_mask_width, causal_divider, s_divider, r_divider, x_divider
+        randomize_mask_width, causal_divider, s_divider, r_divider, x_divider,
+        no_special_tokens, alternate_denoisers,
     )):
         if user_param is not None:
-            settings = [setting for setting in settings if setting[i] == user_param or (i>0 and setting[0] is False)]
+            settings = [setting for setting in settings if setting[i] == user_param or (i>4 and setting[4] is False)]
 
     results = {
+        "num_heads": [],
+        "linear_value": [],
+        "num_params": [],
+        "depth": [],
+        "width": [],
         "ul2": [],
         "causal_denoisers": [],
         "randomize_denoiser_settings": [],
         "randomize_mask_width": [],
+        "no_special_tokens": [],
+        "alternate_denoisers": [],
         "causal_divider": [],
         "s_divider": [],
         "r_divider": [],
         "x_divider": [],
         "best_n_mean": [],
+        "color": [],
+        "i": [],
+        "num_curves": [],
     }
-    for i, (
+    colors = generate_distinct_colors(n=len(results))
+    for i, (color, (
+        num_heads_, linear_value_, depth_, width_,
         ul2_, causal_denoisers_, randomize_denoiser_settings_,
         randomize_mask_width_, causal_divider_, s_divider_,
         r_divider_, x_divider_,
-    ) in enumerate(settings):
-        xs, _, avg_ys = load_xs_ys_avg_y(
+        no_special_tokens_, alternate_denoisers_,
+    )) in enumerate(zip(colors, settings)):
+        num_params = pl.scan_csv(file).filter(
+            (pl.col("num_heads") == num_heads_)
+            & (pl.col("linear_value") == linear_value_)
+            & (pl.col("depth") == depth_)
+            & (pl.col("ul2") == ul2_)
+            & (pl.col("causal_denoisers") == causal_denoisers_)
+            & (pl.col("randomize_denoiser_settings") == randomize_denoiser_settings_)
+            & (pl.col("randomize_mask_width") == randomize_mask_width_)
+            & (pl.col("causal_divider") == causal_divider_)
+            & (pl.col("no_special_tokens") == no_special_tokens_)
+            & (pl.col("alternate_denoisers") == alternate_denoisers_)
+            & (pl.col("s_divider") == s_divider_)
+            & (pl.col("r_divider") == r_divider_)
+            & (pl.col("x_divider") == x_divider_)
+        ).collect()["num_params"][0]
+        _, ys, avg_ys = load_xs_ys_avg_y(
             file,
+            num_heads=num_heads_,
+            linear_value=linear_value_,
+            depth=depth_,
+            width=width_,
             ul2=ul2_,
             causal_denoisers=causal_denoisers_,
             randomize_denoiser_settings=randomize_denoiser_settings_,
             randomize_mask_width=randomize_mask_width_,
+            no_special_tokens=no_special_tokens_,
+            alternate_denoisers=alternate_denoisers_,
             causal_divider=causal_divider_,
             s_divider=s_divider_,
             r_divider=r_divider_,
@@ -439,41 +502,62 @@ def count_mean_of_n_best_values(
         if best == "min":
             best_n_mean = np.mean(np.sort(avg_ys)[:n])
         else:
-            best_n_mean = np.mean(np.sort(avg_ys)[-n:])
+            best_n_mean = np.mean(np.flip(np.sort(avg_ys), axis=0)[:n])
 
+        results["num_heads"].append(num_heads_)
+        results["linear_value"].append(linear_value_)
+        results["num_params"].append(num_params),
+        results["depth"].append(depth_)
+        results["width"].append(width_)
         results["ul2"].append(ul2_)
         results["causal_denoisers"].append(causal_denoisers_)
         results["randomize_denoiser_settings"].append(randomize_denoiser_settings_)
         results["randomize_mask_width"].append(randomize_mask_width_)
+        results["no_special_tokens"].append(no_special_tokens_)
+        results["alternate_denoisers"].append(alternate_denoisers_)
         results["causal_divider"].append(causal_divider_)
         results["s_divider"].append(s_divider_)
         results["r_divider"].append(r_divider_)
         results["x_divider"].append(x_divider_)
         results["best_n_mean"].append(best_n_mean)
+        results["color"].append(color)
+        results["i"].append(i)
+        results["num_curves"].append(len(ys))
 
-    results = pl.DataFrame(results).sort(by="best_n_mean")
+    results = pl.DataFrame(results).sort(by="best_n_mean", descending=best=="max")
     table = rich.table.Table(
-        "ul2", "causal_denoisers", "randomize_denoiser_settings", "randomize_mask_width", 
-        "causal_divider", "s_divider", "r_divider", "x_divider", "best_n_mean",
+        "i", "#curves", "#params", "depth", "width",
+        "ul2", "causal dens", "rand setts", "rand w", 
+        "no toks", "alternate dens",
+        "C div", "S div", "R div", "X div", f"mean (best {n})",
+        title=to_plot,
     )
     for i in range(len(results)):
         table.add_row(
+            str(results["i"][i]),
+            str(results["num_curves"][i]),
+            format_num_params(results["num_params"][i]),
+            str(results["depth"][i]),
+            str(results["width"][i]),
             str(results["ul2"][i]),
             str(results["causal_denoisers"][i]),
             str(results["randomize_denoiser_settings"][i]),
             str(results["randomize_mask_width"][i]),
+            str(results["no_special_tokens"][i]),
+            str(results["alternate_denoisers"][i]),
             str(results["causal_divider"][i]),
             str(results["s_divider"][i]),
             str(results["r_divider"][i]),
             str(results["x_divider"][i]),
             f"{results['best_n_mean'][i]:.4f}",
+            style=rich.style.Style(color=results["color"][i])
         )
 
     print(table)
 
 
 if __name__ == "__main__":
-    results_five = "results/results_five.csv"
+    results_seven = "results/results_seven.csv"
     # plot_metric_curves(
     #     file=results_five,
     #     depth=21,
@@ -495,20 +579,21 @@ if __name__ == "__main__":
     #     plot_all=False,
     # )
 
-    count_mean_of_n_best_values(
-        file=results_five,
-        n=5,
-        best="min",
-        ul2=None,
-        causal_denoisers=None,
-        randomize_denoiser_settings=None,
-        randomize_mask_width=None,
-        causal_divider=None,
-        s_divider=None,
-        r_divider=None,
-        x_divider=None,
-        to_plot="val_loss_causal",
-        plot_over="epoch",
-    )
-
-    # TODO: I fucked up and did *causal_divider, not /causal_divider...
+    for to_plot in ("val_pplx_causal", "val_pplx_s", "val_pplx_r", "val_pplx_x"):
+        count_mean_of_n_best_values(
+            file=results_seven,
+            n=5,
+            best="min",
+            ul2=None,
+            causal_denoisers=None,
+            randomize_denoiser_settings=None,
+            randomize_mask_width=None,
+            alternate_denoisers=True,
+            depth=35,
+            causal_divider=None,
+            s_divider=None,
+            r_divider=None,
+            x_divider=None,
+            to_plot=to_plot,
+            plot_over="epoch",
+        )
