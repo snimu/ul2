@@ -256,12 +256,15 @@ class LatentAttentionBlock(nn.Module):
         # Has a high lr mult applied to it so that each layer can learn its own attention scale.
         self.position_bias_mult = nn.Parameter(torch.tensor(1., device='cuda'))
 
-    def forward(self, x, mode: Literal['causal', 's_denoising', 'r_denoising', 'x_denoising'] = "causal"):
+    def forward(self, x, mode: Literal['causal', 'noncausal', 'mixed'] = "causal"):
         residual = x
 
         # Make additive attention mask, scaled by a learned mult for the position bias (lets us learn dynamic attention ranges per layer as needed)
         if mode == "causal":
             attn_mask = torch.where(causal_mask[:x.shape[1], :x.shape[1]], F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]], negative_infinity_matrix_base[:x.shape[1], :x.shape[1]])
+        if mode == "mixed":
+            masked_spans = (x == hyp['misc']['mask_token']).bool() & causal_mask[:x.shape[1], :x.shape[1]]
+            attn_mask = torch.where(masked_spans, F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]], negative_infinity_matrix_base[:x.shape[1], :x.shape[1]])
         else:
             attn_mask = F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]]
         # Shared LayerNorm for linear layers and attention
@@ -310,7 +313,7 @@ class SpeedyLangNet(nn.Module):
         super().__init__()
         self.net_dict = network_dict
 
-    def forward(self, x, mode: Literal['causal', 's_denoising', 'r_denoising', 'x_denoising'] = "causal"):
+    def forward(self, x, mode: Literal['causal', 'noncausal', 'mixed'] = "causal"):
         # Look up the input embeddings from the input tokens
         x = self.net_dict['embedding'](x)
         for attn_block in self.net_dict['attn_layers']:
@@ -674,7 +677,7 @@ def calc_pplx(loss: torch.Tensor | float) -> torch.Tensor | float:
     return 2.71828 ** loss
 
 
-def eval(net, causal_denoisers: bool = False, no_special_tokens: bool = False):
+def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tokens: bool = False):
     ####################
     # Evaluation  Mode #
     ####################
@@ -690,6 +693,8 @@ def eval(net, causal_denoisers: bool = False, no_special_tokens: bool = False):
     val_loss_s = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
     val_loss_r = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
     val_loss_x = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
+
+    
     with torch.no_grad():
         # Note: We eval at the maximum sequence length so that we can get an idea of how well the sequence length growing extrapolates out
         for _ in range(num_eval_steps):
@@ -704,30 +709,30 @@ def eval(net, causal_denoisers: bool = False, no_special_tokens: bool = False):
                 sequence, 
                 mask_width=None, 
                 masking_rate=0.25, 
-                causal=causal_denoisers,
+                causal=mask_mode in ('causal', 'mixed'),
                 no_special_tokens=no_special_tokens,
             )
-            outputs = net(inputs, mode='causal' if causal_denoisers else 's_denoising')
+            outputs = net(inputs, mode=mask_mode)
             val_loss_s += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
 
             inputs, targets = get_r_denoised_data(
                 sequence, 
                 mask_width=3, 
                 masking_rate=0.15, 
-                causal=causal_denoisers,
+                causal=mask_mode in ('causal', 'mixed'),
                 no_special_tokens=no_special_tokens,
             )
-            outputs = net(inputs, mode='causal' if causal_denoisers else 'r_denoising')
+            outputs = net(inputs, mode=mask_mode)
             val_loss_r += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
 
             inputs, targets = get_x_denoised_data(
                 sequence, 
                 mask_width=8, 
                 masking_rate=0.5, 
-                causal=causal_denoisers,
+                causal=mask_mode in ('causal', 'mixed'),
                 no_special_tokens=no_special_tokens,
             )
-            outputs = net(inputs, mode='causal' if causal_denoisers else 'x_denoising')
+            outputs = net(inputs, mode=mask_mode)
             val_loss_x += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
 
         val_pplx = calc_pplx(val_loss)
@@ -855,6 +860,13 @@ def train(net: SpeedyLangNet | None = None, **settings):
     iteration = 0
     modulo_every = sum([int(d) for d in [s_denoising_enabled, r_denoising_enabled, x_denoising_enabled, causal_pred_enabled]])
 
+    if settings['causal_denoisers'] and settings['noncausal_masking']:
+        mask_mode = "mixed"
+    elif settings['causal_denoisers']:
+        mask_mode = "causal"
+    else:
+        mask_mode = "noncausal"
+    
     # Main loop. Most of the complexity here is in the dynamic growing scheduler(s).
     while True:
         sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
@@ -912,7 +924,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 causal=settings['causal_denoisers'],
                 no_special_tokens=settings['no_special_tokens'],
             )
-            outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 's_denoising')
+            outputs = net(inputs, mode=mask_mode)
             loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["s_divider"]
 
         if r_denoising:
@@ -926,7 +938,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 causal=settings['causal_denoisers'],
                 no_special_tokens=settings['no_special_tokens'],
             )
-            outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'r_denoising')
+            outputs = net(inputs, mode=mask_mode)
             loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["r_divider"]
 
         if x_denoising:
@@ -940,10 +952,10 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 causal=settings['causal_denoisers'],
                 no_special_tokens=settings['no_special_tokens'],
             )
-            outputs = net(inputs, mode='causal' if settings['causal_denoisers'] else 'x_denoising')
+            outputs = net(inputs, mode=mask_mode)
             loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["x_divider"]
 
-        if causal_pred:        
+        if causal_pred:
             inputs, targets = get_causal_data(sequence)
             outputs = net(inputs, mode='causal')
             loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["causal_divider"]
@@ -1035,7 +1047,11 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 val_loss_s, val_pplx_s,
                 val_loss_r, val_pplx_r,
                 val_loss_x, val_pplx_x,
-            ) = eval(net, causal_denoisers=settings['causal_denoisers'], no_special_tokens=settings['no_special_tokens'])
+            ) = eval(
+                net, 
+                mask_mode=mask_mode, 
+                no_special_tokens=settings['no_special_tokens'],
+            )
 
             val_losses_causal.append(val_loss_causal)
             val_losses_s.append(val_loss_s)
@@ -1257,6 +1273,11 @@ def get_args() -> argparse.Namespace:
         help="If set, the X-, R-, and S-denoisers work in a fully causal, but masked, setting. FLAG"
     )
     parser.add_argument(
+        "--noncausal_masking",
+        action="store_true",
+        help="If set, the attention mask at masked parts will be bidirectional. FLAG"
+    )
+    parser.add_argument(
         "--s_divider",
         type=float, default=6., nargs="+",
         help="Divider for the S-denoising loss. TYPE: float; DEFAULT: 6."
@@ -1425,6 +1446,9 @@ def make_run_name(**settings):
             run_name = "no-special-tokens_" + run_name
         if settings['alternate_denoisers']:
             run_name = "alternate-denoisers_" + run_name
+        if settings['noncausal_masking']:
+            run_name = "noncausal-masking_" + run_name
+
         run_name = (
             "loss-dividers-C-S-R-X_"
             f"{settings['causal_divider']}-{settings['s_divider']}"
@@ -1484,6 +1508,7 @@ def main():
                 f"\n:::    num_non_embedding_params={format_num_params(num_non_embedding_params)}"
                 f"\n:::    ul2={args.ul2}"
                 f"\n:::    causal_denoisers={args.causal_denoisers}"
+                f"\n:::    noncausal_masking={args.noncausal_masking}"
                 f"\n:::    {causal_divider=}"
                 f"\n:::    {s_divider=}"
                 f"\n:::    {r_divider=}"
@@ -1506,6 +1531,7 @@ def main():
                 seed=seed,
                 ul2=args.ul2,
                 causal_denoisers=args.causal_denoisers,
+                noncausal_masking=args.noncausal_masking,
                 causal_divider=causal_divider,
                 s_divider=s_divider,
                 r_divider=r_divider,
@@ -1553,6 +1579,7 @@ def main():
                 seed=seed,
                 ul2=args.ul2,
                 causal_denoisers=args.causal_denoisers,
+                noncausal_masking=args.noncausal_masking,
                 causal_divider=causal_divider,
                 s_divider=s_divider,
                 r_divider=r_divider,
@@ -1587,6 +1614,7 @@ def main():
                 "last_val_loss": [last_val_loss],
                 "ul2": [args.ul2],
                 "causal_denoisers": [args.causal_denoisers],
+                "noncausal_masking": [args.noncausal_masking],
                 "causal_divider": [causal_divider],
                 "s_divider": [s_divider],
                 "r_divider": [r_divider],
