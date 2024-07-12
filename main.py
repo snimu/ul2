@@ -256,17 +256,12 @@ class LatentAttentionBlock(nn.Module):
         # Has a high lr mult applied to it so that each layer can learn its own attention scale.
         self.position_bias_mult = nn.Parameter(torch.tensor(1., device='cuda'))
 
-    def forward(self, x, mode: Literal['causal', 'noncausal', 'mixed'] = "causal"):
+    def forward(self, x, attn_mask: torch.Tensor):
         residual = x
 
         # Make additive attention mask, scaled by a learned mult for the position bias (lets us learn dynamic attention ranges per layer as needed)
-        if mode == "causal":
-            attn_mask = torch.where(causal_mask[:x.shape[1], :x.shape[1]], F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]], negative_infinity_matrix_base[:x.shape[1], :x.shape[1]])
-        if mode == "mixed":
-            masked_spans = (x == hyp['misc']['mask_token']).bool() & causal_mask[:x.shape[1], :x.shape[1]]
-            attn_mask = torch.where(masked_spans, F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]], negative_infinity_matrix_base[:x.shape[1], :x.shape[1]])
-        else:
-            attn_mask = F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]]
+        attn_mask_with_positional_bias = torch.where(attn_mask, F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]], negative_infinity_matrix_base[:x.shape[1], :x.shape[1]])
+        
         # Shared LayerNorm for linear layers and attention
         x = self.norm(x)
 
@@ -288,7 +283,7 @@ class LatentAttentionBlock(nn.Module):
 
 
         # Compute attention. Something to note is that there are no attention heads here. This seemed to work a bit better, maybe due to not needing memory `.contiguous()` calls or similar
-        attention = F.scaled_dot_product_attention(query, key, geglu_attention_value, attn_mask=attn_mask)
+        attention = F.scaled_dot_product_attention(query, key, geglu_attention_value, attn_mask=attn_mask_with_positional_bias)
 
         if self.num_heads > 1:
             attention = einops.rearrange(attention, 'b h n d -> b n (h d)')
@@ -313,11 +308,46 @@ class SpeedyLangNet(nn.Module):
         super().__init__()
         self.net_dict = network_dict
 
+    @torch.no_grad()
+    def make_mask(x, mode: Literal['causal', 'noncausal', 'mixed'] = "causal") -> torch.Tensor:
+        if mode == 'causal':
+            attn_mask = causal_mask[:x.shape[1], :x.shape[1]]
+        elif mode == 'noncausal':
+            attn_mask = torch.ones(x.shape[1], x.shape[1], device=hyp['misc']['device'], dtype=torch.bool)
+        else:
+            # x: [1, mask, mask, 6] (times batchsize)
+            attn_mask: torch.Tensor = (x == hyp['misc']['mask_token']).bool()
+            # x: [0, 1, 1, 0]
+            attn_mask = einops.repeat(attn_mask, 'b l -> b l h', h=x.shape[1])
+            # x: [
+            #       [0, 1, 1, 0], 
+            #       [0, 1, 1, 0],
+            #       [0, 1, 1, 0],
+            #       [0, 1, 1, 0]
+            # ]
+            attn_mask = attn_mask & attn_mask.swapaxes(1, 2)
+            # x: [
+            #       [0, 0, 0, 0], 
+            #       [0, 1, 1, 0],
+            #       [0, 1, 1, 0],
+            #       [0, 0, 0, 0]
+            # ]
+            attn_mask = attn_mask | causal_mask[:x.shape[1], :x.shape[1]].unsqueeze(0)
+            # x: [
+            #       [1, 1, 1, 0], 
+            #       [1, 1, 1, 0],
+            #       [1, 1, 1, 0],
+            #       [1, 1, 1, 1]
+            # ]
+
+        return attn_mask
+
     def forward(self, x, mode: Literal['causal', 'noncausal', 'mixed'] = "causal"):
         # Look up the input embeddings from the input tokens
+        attn_mask = self.make_mask(x, mode=mode)
         x = self.net_dict['embedding'](x)
         for attn_block in self.net_dict['attn_layers']:
-            x = attn_block(x, mode=mode) # note: residuals are included in the block definitions for these layers
+            x = attn_block(x, attn_mask=attn_mask) # note: residuals are included in the block definitions for these layers
         x = self.net_dict['norm'](x)
         x = self.net_dict['outputs'](x)
         return x
