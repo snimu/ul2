@@ -309,7 +309,7 @@ class SpeedyLangNet(nn.Module):
         self.net_dict = network_dict
 
     @torch.no_grad()
-    def make_mask(x, mode: Literal['causal', 'noncausal', 'mixed'] = "causal") -> torch.Tensor:
+    def make_mask(self, x, mode: Literal['causal', 'noncausal', 'mixed'] = "causal") -> torch.Tensor:
         if mode == 'causal':
             attn_mask = causal_mask[:x.shape[1], :x.shape[1]]
         elif mode == 'noncausal':
