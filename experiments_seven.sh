@@ -33,6 +33,13 @@ python main.py -cw --logfile results_seven23.csv --wandb_project ul2.seven --mod
 python main.py -cw --logfile results_seven24.csv --wandb_project ul2.seven --model_scale 40.0 --seed 1500 --gpu_capacity_scalar 0.6 --num_runs 5 --max_epochs 4 --ul2 --causal_divider 1000.0 --s_divider 1000.0 --r_divider 1000.0 --x_divider 1.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --no_special_tokens
 python main.py -cw --logfile results_seven25.csv --wandb_project ul2.seven --model_scale 40.0 --seed 1500 --gpu_capacity_scalar 0.6 --num_runs 5 --max_epochs 4
 
+# More experiments with X-denoising and no special tokens
+python main.py -cw --logfile results_seven28.csv --wandb_project ul2.seven --model_scale 20.0 --seed 1501 --gpu_capacity_scalar 0.6 --num_runs 4 --max_epochs 4 --ul2 --causal_divider 1000.0 --s_divider 1000.0 --r_divider 1000.0 --x_divider 1.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --no_special_tokens
+
 # Now, with a mixed setting (x-denoising with --causal_denoisers and --noncausal_masking, at scale 20.0 and 40.0, 1 run each)
 python main.py -cw --logfile results_seven26.csv --wandb_project ul2.seven --model_scale 20.0 --seed 1500 --gpu_capacity_scalar 0.6 --num_runs 1 --max_epochs 4 --ul2 --causal_divider 1000.0 --s_divider 1000.0 --r_divider 1000.0 --x_divider 1.0  --causal_denoisers --noncausal_masking --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --no_special_tokens
 python main.py -cw --logfile results_seven27.csv --wandb_project ul2.seven --model_scale 40.0 --seed 1500 --gpu_capacity_scalar 0.6 --num_runs 1 --max_epochs 4 --ul2 --causal_divider 1000.0 --s_divider 1000.0 --r_divider 1000.0 --x_divider 1.0  --causal_denoisers --noncausal_masking --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --no_special_tokens
+
+# Best causal setting seems to be 1-0-0-1 (c-s-r-x), let's try it 4 more times at scale 20.0 and 5 times at scale 40.0
+python main.py -cw --logfile results_seven29.csv --wandb_project ul2.seven --model_scale 20.0 --seed 1501 --gpu_capacity_scalar 0.6 --num_runs 4 --max_epochs 4 --ul2 --causal_divider 1.0 --s_divider 1000.0 --r_divider 1000.0 --x_divider 1.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width
+python main.py -cw --logfile results_seven30.csv --wandb_project ul2.seven --model_scale 40.0 --seed 1500 --gpu_capacity_scalar 0.6 --num_runs 5 --max_epochs 4 --ul2 --causal_divider 1.0 --s_divider 1000.0 --r_divider 1000.0 --x_divider 1.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width
