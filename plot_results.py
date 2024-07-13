@@ -19,11 +19,16 @@ def close_plt() -> None:
     plt.close()
 
 
-def series_to_array(series: pl.Series) -> np.ndarray:
+def series_to_array(series: pl.Series | str) -> np.ndarray:
     try:
         return np.array(ast.literal_eval(series[0]))
     except SyntaxError:
-        return np.array(ast.literal_eval(series))
+        try:
+            return np.array(ast.literal_eval(series))
+        except ValueError:
+            series = series.replace("nan", "0")
+            series = series.replace("inf", str(float(np.finfo(np.float16).max)))
+            return np.array(ast.literal_eval(series))
 
 
 def format_num_params(num_params: int, round_to_digits: int = 1) -> str:
@@ -61,6 +66,7 @@ def load_xs_ys_avg_y(
         seed: int | None = None,
         ul2: bool | None = None,
         causal_denoisers: bool | None = None,
+        noncausal_masking: bool | None = None,
         randomize_denoiser_settings: bool | None = None,
         randomize_mask_width: bool | None = None,
         no_special_tokens: bool | None = None,
@@ -95,6 +101,8 @@ def load_xs_ys_avg_y(
         filters &= (pl.col("ul2") == ul2)
     if causal_denoisers is not None:
         filters &= (pl.col("causal_denoisers") == causal_denoisers)
+    if noncausal_masking is not None:
+        filters &= (pl.col("noncausal_masking") == noncausal_masking)
     if randomize_denoiser_settings is not None:
         filters &= (pl.col("randomize_denoiser_settings") == randomize_denoiser_settings)
     if randomize_mask_width is not None:
@@ -408,6 +416,7 @@ def count_mean_of_n_best_values(
         num_heads: int | None = None,
         linear_value: bool | None = False,
         causal_denoisers: bool | None = None,
+        noncausal_masking: bool | None = None,
         randomize_denoiser_settings: bool | None = None,
         randomize_mask_width: bool | None = None,
         no_special_tokens: bool | None = None,
@@ -425,7 +434,7 @@ def count_mean_of_n_best_values(
         file,
         [
             "num_heads", "linear_value", "depth", "width",
-            "ul2", "causal_denoisers", "randomize_denoiser_settings",
+            "ul2", "causal_denoisers", "noncausal_masking", "randomize_denoiser_settings",
             "randomize_mask_width", "causal_divider", "s_divider",
             "r_divider", "x_divider", "no_special_tokens", "alternate_denoisers",
         ],
@@ -433,7 +442,7 @@ def count_mean_of_n_best_values(
 
     for i, user_param in enumerate((
         num_heads, linear_value, depth, width, 
-        ul2, causal_denoisers, randomize_denoiser_settings, 
+        ul2, causal_denoisers, noncausal_masking, randomize_denoiser_settings, 
         randomize_mask_width, causal_divider, s_divider, r_divider, x_divider,
         no_special_tokens, alternate_denoisers,
     )):
@@ -448,6 +457,7 @@ def count_mean_of_n_best_values(
         "width": [],
         "ul2": [], 
         "causal dens": [], 
+        "nonC mask": [],
         "rand setts": [],
         "rand w": [],
         "no toks": [],
@@ -460,7 +470,7 @@ def count_mean_of_n_best_values(
     }
     for i, (
         num_heads_, linear_value_, depth_, width_,
-        ul2_, causal_denoisers_, randomize_denoiser_settings_,
+        ul2_, causal_denoisers_, noncausal_masking_, randomize_denoiser_settings_,
         randomize_mask_width_, causal_divider_, s_divider_,
         r_divider_, x_divider_,
         no_special_tokens_, alternate_denoisers_,
@@ -471,6 +481,7 @@ def count_mean_of_n_best_values(
             & (pl.col("depth") == depth_)
             & (pl.col("ul2") == ul2_)
             & (pl.col("causal_denoisers") == causal_denoisers_)
+            & (pl.col("noncausal_masking") == noncausal_masking_)
             & (pl.col("randomize_denoiser_settings") == randomize_denoiser_settings_)
             & (pl.col("randomize_mask_width") == randomize_mask_width_)
             & (pl.col("causal_divider") == causal_divider_)
@@ -488,6 +499,7 @@ def count_mean_of_n_best_values(
             width=width_,
             ul2=ul2_,
             causal_denoisers=causal_denoisers_,
+            noncausal_masking=noncausal_masking_,
             randomize_denoiser_settings=randomize_denoiser_settings_,
             randomize_mask_width=randomize_mask_width_,
             no_special_tokens=no_special_tokens_,
@@ -522,6 +534,7 @@ def count_mean_of_n_best_values(
         results["width"].append(width_)
         results["ul2"].append(ul2_)
         results["causal dens"].append(causal_denoisers_)
+        results["nonC mask"].append(noncausal_masking_)
         results["rand setts"].append(randomize_denoiser_settings_)
         results["rand w"].append(randomize_mask_width_)
         results["no toks"].append(no_special_tokens_)
@@ -585,7 +598,7 @@ if __name__ == "__main__":
 
     for to_plot in (
             "val_pplx_causal", "val_pplx_s", "val_pplx_r", "val_pplx_x",
-            "val_loss_causal", "val_loss_s", "val_loss_r", "val_loss_x",
+            # "val_loss_causal", "val_loss_s", "val_loss_r", "val_loss_x",
     ):
         n = 5
         count_mean_of_n_best_values(
