@@ -71,6 +71,7 @@ def load_xs_ys_avg_y(
         randomize_mask_width: bool | None = None,
         no_special_tokens: bool | None = None,
         alternate_denoisers: bool | None = None,
+        progressive_tasks: bool | None = None,
         causal_divider: float | None = None,
         s_divider: float | None = None,
         r_divider: float | None = None,
@@ -111,6 +112,8 @@ def load_xs_ys_avg_y(
         filters &= (pl.col("no_special_tokens") == no_special_tokens)
     if alternate_denoisers is not None:
         filters &= (pl.col("alternate_denoisers") == alternate_denoisers)
+    if progressive_tasks is not None:
+        filters &= (pl.col("progressive_tasks") == progressive_tasks)
     if causal_divider is not None:
         filters &= (pl.col("causal_divider") == causal_divider)
     if s_divider is not None:
@@ -288,6 +291,7 @@ def plot_metric_curves(
         randomize_mask_width: bool | None = None,
         no_special_tokens: bool | None = None,
         alternate_denoisers: bool | None = None,
+        progressive_tasks: bool | None = None,
         causal_divider: float | None = None,
         s_divider: float | None = None,
         r_divider: float | None = None,
@@ -304,7 +308,7 @@ def plot_metric_curves(
         [
             "num_heads", "linear_value", "depth", "width",
             "ul2", "causal_denoisers", "noncausal_masking", "randomize_denoiser_settings",
-            "randomize_mask_width", "causal_divider", "s_divider",
+            "randomize_mask_width", "progressive_tasks", "causal_divider", "s_divider",
             "r_divider", "x_divider", "no_special_tokens", "alternate_denoisers",
         ],
     )
@@ -312,7 +316,7 @@ def plot_metric_curves(
     for i, user_param in enumerate((
         num_heads, linear_value, depth, width, 
         ul2, causal_denoisers, noncausal_masking, randomize_denoiser_settings, 
-        randomize_mask_width, causal_divider, s_divider, r_divider, x_divider,
+        randomize_mask_width, progressive_tasks, causal_divider, s_divider, r_divider, x_divider,
         no_special_tokens, alternate_denoisers,
     )):
         if user_param is not None:
@@ -323,7 +327,7 @@ def plot_metric_curves(
     for color, (
             num_heads_, linear_value_, depth_, width_,
             ul2_, causal_denoisers_, noncausal_masking_, randomize_denoiser_settings_, randomize_mask_width_,
-            causal_divider_, s_divider_, r_divider_, x_divider_,
+            progressive_tasks_, causal_divider_, s_divider_, r_divider_, x_divider_,
             no_special_tokens_, alternate_denoisers_,
     ) in zip(colors, settings):
         xs, ys, avg_ys = load_xs_ys_avg_y(
@@ -339,6 +343,7 @@ def plot_metric_curves(
             randomize_mask_width=randomize_mask_width_,
             no_special_tokens=no_special_tokens_,
             alternate_denoisers=alternate_denoisers_,
+            progressive_tasks=progressive_tasks_,
             causal_divider=causal_divider_,
             s_divider=s_divider_,
             r_divider=r_divider_,
@@ -365,6 +370,7 @@ def plot_metric_curves(
             & (pl.col("causal_divider") == causal_divider_)
             & (pl.col("no_special_tokens") == no_special_tokens_)
             & (pl.col("alternate_denoisers") == alternate_denoisers_)
+            & (pl.col("progressive_tasks") == progressive_tasks_)
             & (pl.col("s_divider") == s_divider_)
             & (pl.col("r_divider") == r_divider_)
             & (pl.col("x_divider") == x_divider_)
@@ -385,6 +391,8 @@ def plot_metric_curves(
                 label += ", no tok"
             if alternate_denoisers_:
                 label += ", alternate dens"
+            if progressive_tasks_:
+                label += ", prog"
         else:
             label = "standard training"
         if loglog:
@@ -426,6 +434,7 @@ def count_mean_of_n_best_values(
         randomize_mask_width: bool | None = None,
         no_special_tokens: bool | None = None,
         alternate_denoisers: bool | None = None,
+        progressive_tasks: bool | None = None,
         causal_divider: float | None = None,
         s_divider: float | None = None,
         r_divider: float | None = None,
@@ -440,7 +449,7 @@ def count_mean_of_n_best_values(
         [
             "num_heads", "linear_value", "depth", "width",
             "ul2", "causal_denoisers", "noncausal_masking", "randomize_denoiser_settings",
-            "randomize_mask_width", "causal_divider", "s_divider",
+            "randomize_mask_width", "progressive_tasks", "causal_divider", "s_divider",
             "r_divider", "x_divider", "no_special_tokens", "alternate_denoisers",
         ],
     )
@@ -448,7 +457,7 @@ def count_mean_of_n_best_values(
     for i, user_param in enumerate((
         num_heads, linear_value, depth, width, 
         ul2, causal_denoisers, noncausal_masking, randomize_denoiser_settings, 
-        randomize_mask_width, causal_divider, s_divider, r_divider, x_divider,
+        randomize_mask_width, progressive_tasks, causal_divider, s_divider, r_divider, x_divider,
         no_special_tokens, alternate_denoisers,
     )):
         if user_param is not None:
@@ -467,6 +476,7 @@ def count_mean_of_n_best_values(
         "rand w": [],
         "no toks": [],
         "alternate dens": [],
+        "prog": [],
         "C div": [],
         "S div": [],
         "R div": [],
@@ -476,7 +486,7 @@ def count_mean_of_n_best_values(
     for i, (
         num_heads_, linear_value_, depth_, width_,
         ul2_, causal_denoisers_, noncausal_masking_, randomize_denoiser_settings_,
-        randomize_mask_width_, causal_divider_, s_divider_,
+        randomize_mask_width_, progressive_tasks_, causal_divider_, s_divider_,
         r_divider_, x_divider_,
         no_special_tokens_, alternate_denoisers_,
     ) in enumerate(settings):
@@ -492,6 +502,7 @@ def count_mean_of_n_best_values(
             & (pl.col("causal_divider") == causal_divider_)
             & (pl.col("no_special_tokens") == no_special_tokens_)
             & (pl.col("alternate_denoisers") == alternate_denoisers_)
+            & (pl.col("progressive_tasks") == progressive_tasks_)
             & (pl.col("s_divider") == s_divider_)
             & (pl.col("r_divider") == r_divider_)
             & (pl.col("x_divider") == x_divider_)
@@ -509,6 +520,7 @@ def count_mean_of_n_best_values(
             randomize_mask_width=randomize_mask_width_,
             no_special_tokens=no_special_tokens_,
             alternate_denoisers=alternate_denoisers_,
+            progressive_tasks=progressive_tasks_,
             causal_divider=causal_divider_,
             s_divider=s_divider_,
             r_divider=r_divider_,
@@ -544,6 +556,7 @@ def count_mean_of_n_best_values(
         results["rand w"].append(randomize_mask_width_)
         results["no toks"].append(no_special_tokens_)
         results["alternate dens"].append(alternate_denoisers_)
+        results["prog"].append(progressive_tasks_)
         results["C div"].append(causal_divider_)
         results["S div"].append(s_divider_)
         results["R div"].append(r_divider_)
