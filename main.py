@@ -779,6 +779,56 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
     )
 
 
+def choose_task(
+            causal_pred_enabled: bool,
+            s_denoising_enabled: bool,
+            r_denoising_enabled: bool,
+            x_denoising_enabled: bool,
+            alternate_denoisers: bool,
+            progressive_tasks: bool,
+            iteration: int,
+            modulo_every: int,
+            max_epochs: float,
+            curr_epoch: float,
+) -> tuple[bool, bool, bool, bool]:
+    """Returns causal_pred, s_denoising, r_denoising, x_denoising"""
+    if not alternate_denoisers:
+        return causal_pred_enabled, s_denoising_enabled, r_denoising_enabled, x_denoising_enabled
+
+    if not progressive_tasks:
+        s_denoising = s_denoising_enabled and (iteration % modulo_every == 0)
+        r_denoising = r_denoising_enabled and (iteration % modulo_every == int(s_denoising_enabled))
+        x_denoising = x_denoising_enabled and (iteration % modulo_every == int(s_denoising_enabled) + int(r_denoising_enabled))
+        causal_pred = causal_pred_enabled and (iteration % modulo_every == int(s_denoising_enabled) + int(r_denoising_enabled) + int(x_denoising_enabled))
+        return causal_pred, s_denoising, r_denoising, x_denoising
+    
+    # Progressive tasks
+    num_active = sum(
+        [1 for value in (
+            causal_pred_enabled, s_denoising_enabled, r_denoising_enabled, x_denoising_enabled
+        ) if value]
+    )
+    num_active = max(1, num_active)
+    start_distr = torch.tensor([4, 3, 2, 1], dtype=torch.bfloat16, device=hyp['misc']['device'])
+    end_distr = start_distr.flip(0)
+    distr = torch.lerp(start_distr, end_distr, curr_epoch/max_epochs)
+    distr = distr / distr.sum()
+    
+    values = [
+        causal_pred_value := distr[0] * torch.randn(1).item() * int(causal_pred_enabled),
+        r_denoising_value := distr[1] * torch.randn(1).item() * int(r_denoising_enabled),
+        x_denoising_value := distr[2] * torch.randn(1).item() * int(x_denoising_enabled),
+        s_denoising_value := distr[3] * torch.randn(1).item() * int(s_denoising_enabled),
+    ]
+
+    causal_pred = causal_pred_value == max(values)
+    r_denoising = r_denoising_value == max(values)
+    x_denoising = x_denoising_value == max(values)
+    s_denoising = s_denoising_value == max(values)
+
+    return causal_pred, s_denoising, r_denoising, x_denoising
+
+
 def train(net: SpeedyLangNet | None = None, **settings):
 
     #################
@@ -898,45 +948,22 @@ def train(net: SpeedyLangNet | None = None, **settings):
     else:
         mask_mode = "noncausal"
     
+    epoch = 0.0
     # Main loop. Most of the complexity here is in the dynamic growing scheduler(s).
     while True:
         sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
 
-        s_denoising = (
-            s_denoising_enabled 
-            and (
-                (iteration % modulo_every == 0) 
-                if settings['alternate_denoisers'] 
-                else True
-            )
-        )
-        r_denoising = (
-            r_denoising_enabled 
-            and (
-                (iteration % modulo_every == int(s_denoising_enabled))
-                if settings['alternate_denoisers'] 
-                else True
-            )
-        )
-        x_denoising = (
-            x_denoising_enabled 
-            and (
-                (iteration % modulo_every == int(s_denoising_enabled) + int(r_denoising_enabled)) 
-                if settings['alternate_denoisers'] 
-                else True
-            )
-        )
-        causal_pred = (
-            causal_pred_enabled 
-            and (
-                (iteration % modulo_every == (
-                    int(s_denoising_enabled) 
-                    + int(r_denoising_enabled) 
-                    + int(x_denoising_enabled))
-                )
-                if settings['alternate_denoisers'] 
-                else True
-            )
+        causal_pred, s_denoising, r_denoising, x_denoising = choose_task(
+            causal_pred_enabled=causal_pred_enabled,
+            s_denoising_enabled=s_denoising_enabled,
+            r_denoising_enabled=r_denoising_enabled,
+            x_denoising_enabled=x_denoising_enabled,
+            alternate_denoisers=settings['alternate_denoisers'],
+            progressive_tasks=settings['progressive_tasks'],
+            iteration=iteration,
+            modulo_every=modulo_every,
+            max_epochs=settings['max_epochs'],
+            curr_epoch=epoch,
         )
 
         iteration += 1
@@ -1369,6 +1396,12 @@ def get_args() -> argparse.Namespace:
         help="If set, will alternate between the different denoisers "
         "that are enabled every step. FLAG"
     )
+    parser.add_argument(
+        "--progressive_tasks",
+        action="store_true",
+        help="If set, will use a progressive task schedule, where the task "
+        "is changed every step according to a schedule that is based on the current epoch. FLAG"
+    )
 
     # PARSE ARGS
     args = parser.parse_args()
@@ -1479,6 +1512,8 @@ def make_run_name(**settings):
             run_name = "alternate-denoisers_" + run_name
         if settings['noncausal_masking']:
             run_name = "noncausal-masking_" + run_name
+        if settings['progressive_tasks']:
+            run_name = "progressive-tasks_" + run_name
 
         run_name = (
             "loss-dividers-C-S-R-X_"
@@ -1549,6 +1584,7 @@ def main():
                 f"\n:::    save_net={args.save_net}"
                 f"\n:::    no_special_tokens={args.no_special_tokens}"
                 f"\n:::    alternate_denoisers={args.alternate_denoisers}"
+                f"\n:::    progressive_tasks={args.progressive_tasks}"
             )
             max_len = max(len(line) for line in title.split("\n"))
             title = "\n".join([line + " " * (max_len - len(line)) + " :::" for line in title.split("\n")])
@@ -1571,6 +1607,7 @@ def main():
                 randomize_mask_width=args.randomize_mask_width,
                 no_special_tokens=args.no_special_tokens,
                 alternate_denoisers=args.alternate_denoisers,
+                progressive_tasks=args.progressive_tasks,
             )
 
             # Seed
@@ -1620,6 +1657,7 @@ def main():
                 run_name=run_name,
                 no_special_tokens=args.no_special_tokens,
                 alternate_denoisers=args.alternate_denoisers,
+                progressive_tasks=args.progressive_tasks,
             )
 
             if args.save_net:
@@ -1654,6 +1692,7 @@ def main():
                 "randomize_mask_width": [args.randomize_mask_width],
                 "no_special_tokens": [args.no_special_tokens],
                 "alternate_denoisers": [args.alternate_denoisers],
+                "progressive_tasks": [args.progressive_tasks],
                 "model_scale": [model_scale],
                 "depth": [hyp['net']['num_blocks']],
                 "width": [hyp['net']['residual_depth']],
