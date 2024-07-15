@@ -58,3 +58,7 @@ python main.py -cw --logfile results_seven34.csv --wandb_project ul2.seven --mod
 # If just X-denoising works so well, let's combine it with R-denoising (but no --noncausal_masking)
 # And let's just go with 5 runs to get good data.
 python main.py -cw --logfile results_seven35.csv --wandb_project ul2.seven --model_scale 20.0 --seed 1500 --gpu_capacity_scalar 0.6 --num_runs 5 --max_epochs 4 --ul2 --causal_divider 1000.0 --s_divider 1000.0 --r_divider 1.0 --x_divider 1.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --no_special_tokens
+
+# Do an additional 4 runs with all dividers at 1 and scale 40, starting from seed 1501
+# At that scale, that setting seems to be best, but it's only one run and I don't trust that.
+python main.py -cw --logfile results_seven36.csv --wandb_project ul2.seven --model_scale 40.0 --seed 1501 --gpu_capacity_scalar 0.6 --num_runs 4 --max_epochs 4 --ul2 --causal_divider 1.0 --s_divider 1.0 --r_divider 1.0 --x_divider 1.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width
