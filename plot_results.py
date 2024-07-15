@@ -283,6 +283,7 @@ def plot_metric_curves(
         linear_value: bool | None = False,
         ul2: bool | None = None,
         causal_denoisers: bool | None = None,
+        noncausal_masking: bool | None = None,
         randomize_denoiser_settings: bool | None = None,
         randomize_mask_width: bool | None = None,
         no_special_tokens: bool | None = None,
@@ -297,11 +298,12 @@ def plot_metric_curves(
         loglog: bool = False,
         plot_all: bool = False,
 ) -> None:
+    
     settings = get_unique_settings(
         file,
         [
             "num_heads", "linear_value", "depth", "width",
-            "ul2", "causal_denoisers", "randomize_denoiser_settings",
+            "ul2", "causal_denoisers", "noncausal_masking", "randomize_denoiser_settings",
             "randomize_mask_width", "causal_divider", "s_divider",
             "r_divider", "x_divider", "no_special_tokens", "alternate_denoisers",
         ],
@@ -309,7 +311,7 @@ def plot_metric_curves(
 
     for i, user_param in enumerate((
         num_heads, linear_value, depth, width, 
-        ul2, causal_denoisers, randomize_denoiser_settings, 
+        ul2, causal_denoisers, noncausal_masking, randomize_denoiser_settings, 
         randomize_mask_width, causal_divider, s_divider, r_divider, x_divider,
         no_special_tokens, alternate_denoisers,
     )):
@@ -320,7 +322,7 @@ def plot_metric_curves(
 
     for color, (
             num_heads_, linear_value_, depth_, width_,
-            ul2_, causal_denoisers_, randomize_denoiser_settings_, randomize_mask_width_,
+            ul2_, causal_denoisers_, noncausal_masking_, randomize_denoiser_settings_, randomize_mask_width_,
             causal_divider_, s_divider_, r_divider_, x_divider_,
             no_special_tokens_, alternate_denoisers_,
     ) in zip(colors, settings):
@@ -332,6 +334,7 @@ def plot_metric_curves(
             linear_value=linear_value_,
             ul2=ul2_,
             causal_denoisers=causal_denoisers_,
+            noncausal_masking=noncausal_masking_,
             randomize_denoiser_settings=randomize_denoiser_settings_,
             randomize_mask_width=randomize_mask_width_,
             no_special_tokens=no_special_tokens_,
@@ -356,6 +359,7 @@ def plot_metric_curves(
             & (pl.col("depth") == depth_)
             & (pl.col("ul2") == ul2_)
             & (pl.col("causal_denoisers") == causal_denoisers_)
+            & (pl.col("noncausal_masking") == noncausal_masking_)
             & (pl.col("randomize_denoiser_settings") == randomize_denoiser_settings_)
             & (pl.col("randomize_mask_width") == randomize_mask_width_)
             & (pl.col("causal_divider") == causal_divider_)
@@ -368,18 +372,19 @@ def plot_metric_curves(
         ).collect()["num_params"][0]
         
         if ul2_:
-            label = f"UL2; causal_divider={causal_divider_}, "
-            label += f"s_divider={s_divider_}, r_divider={r_divider_}, x_divider={x_divider_}"
-            if causal_denoisers_:
-                label += ", causal denoisers"
+            label = f"UL2; C-S-R-X-div: {causal_divider_}-{s_divider_}-{r_divider_}-{x_divider_}"
+            if not causal_denoisers_:
+                label += ", nonC dens"
+            if noncausal_masking_:
+                label += ", nonC mask"
             if randomize_denoiser_settings_:
-                label += ", random denoiser settings"
+                label += ", rand den sets"
             if randomize_mask_width_:
-                label += ", random mask width"
+                label += ", rand w"
             if no_special_tokens_:
-                label += ", no special tokens"
+                label += ", no tok"
             if alternate_denoisers_:
-                label += ", alternate denoisers"
+                label += ", alternate dens"
         else:
             label = "standard training"
         if loglog:
@@ -576,21 +581,18 @@ def count_mean_of_n_best_values(
 if __name__ == "__main__":
     results_seven = "results/results_seven.csv"
     # plot_metric_curves(
-    #     file=results_five,
-    #     depth=21,
-    #     width=1024,
-    #     num_heads=1,
+    #     file=results_seven,
+    #     depth=35,
+    #     width=None,
+    #     num_heads=None,
     #     linear_value=False,
     #     ul2=None,
-    #     causal_denoisers=None,
+    #     causal_denoisers=True,
     #     randomize_denoiser_settings=True,
     #     randomize_mask_width= True,
-    #     causal_divider=1.0,
-    #     s_divider=6.0,
-    #     r_divider=6.0,
-    #     x_divider=6.0,
     #     to_plot="val_loss_causal",
     #     plot_over="epoch",
+    #     x_divider=1.0,
     #     show=True,
     #     loglog=False,
     #     plot_all=False,
