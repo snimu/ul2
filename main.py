@@ -779,6 +779,7 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
     )
 
 
+@torch.no_grad()
 def choose_task(
             causal_pred_enabled: bool,
             s_denoising_enabled: bool,
