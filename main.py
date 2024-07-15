@@ -815,10 +815,10 @@ def choose_task(
     distr = distr / distr.sum()
     
     values = [
-        causal_pred_value := distr[0] * torch.randn(1).item() * int(causal_pred_enabled),
-        r_denoising_value := distr[1] * torch.randn(1).item() * int(r_denoising_enabled),
-        x_denoising_value := distr[2] * torch.randn(1).item() * int(x_denoising_enabled),
-        s_denoising_value := distr[3] * torch.randn(1).item() * int(s_denoising_enabled),
+        causal_pred_value := distr[0].item() * torch.randn(1).item() * int(causal_pred_enabled),
+        r_denoising_value := distr[1].item() * torch.randn(1).item() * int(r_denoising_enabled),
+        x_denoising_value := distr[2].item() * torch.randn(1).item() * int(x_denoising_enabled),
+        s_denoising_value := distr[3].item() * torch.randn(1).item() * int(s_denoising_enabled),
     ]
 
     causal_pred = causal_pred_value == max(values)
