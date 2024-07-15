@@ -62,3 +62,11 @@ python main.py -cw --logfile results_seven35.csv --wandb_project ul2.seven --mod
 # Do an additional 4 runs with all dividers at 1 and scale 40, starting from seed 1501
 # At that scale, that setting seems to be best, but it's only one run and I don't trust that.
 python main.py -cw --logfile results_seven36.csv --wandb_project ul2.seven --model_scale 40.0 --seed 1501 --gpu_capacity_scalar 0.6 --num_runs 4 --max_epochs 4 --ul2 --causal_divider 1.0 --s_divider 1.0 --r_divider 1.0 --x_divider 1.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width
+
+# Now, causal + r- + x-denoising, scale 20, 5 runs each, with and without special tokens
+python main.py -cw --logfile results_seven37.csv --wandb_project ul2.seven --model_scale 20.0 --seed 1500 --gpu_capacity_scalar 0.6 --num_runs 5 --max_epochs 4 --ul2 --causal_divider 1.0 --s_divider 1000.0 --r_divider 1.0 --x_divider 1.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width
+python main.py -cw --logfile results_seven38.csv --wandb_project ul2.seven --model_scale 20.0 --seed 1500 --gpu_capacity_scalar 0.6 --num_runs 5 --max_epochs 4 --ul2 --causal_divider 1.0 --s_divider 1000.0 --r_divider 1.0 --x_divider 1.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --no_special_tokens
+
+# Same as above, but with progressive tasks (aka curriculum learning)
+python main.py -cw --logfile results_seven39.csv --wandb_project ul2.seven --model_scale 20.0 --seed 1500 --gpu_capacity_scalar 0.6 --num_runs 5 --max_epochs 4 --ul2 --causal_divider 1.0 --s_divider 1000.0 --r_divider 1.0 --x_divider 1.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --progressive_tasks
+python main.py -cw --logfile results_seven40.csv --wandb_project ul2.seven --model_scale 20.0 --seed 1500 --gpu_capacity_scalar 0.6 --num_runs 5 --max_epochs 4 --ul2 --causal_divider 1.0 --s_divider 1000.0 --r_divider 1.0 --x_divider 1.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --no_special_tokens --progressive_tasks
