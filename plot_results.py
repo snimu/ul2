@@ -469,6 +469,7 @@ def count_mean_of_n_best_values(
         "#params": [], 
         "depth": [], 
         "width": [],
+        "#heads": [],
         "ul2": [], 
         "causal dens": [], 
         "nonC mask": [],
@@ -494,6 +495,7 @@ def count_mean_of_n_best_values(
             (pl.col("num_heads") == num_heads_)
             & (pl.col("linear_value") == linear_value_)
             & (pl.col("depth") == depth_)
+            & (pl.col("width") == width_)
             & (pl.col("ul2") == ul2_)
             & (pl.col("causal_denoisers") == causal_denoisers_)
             & (pl.col("noncausal_masking") == noncausal_masking_)
@@ -549,6 +551,7 @@ def count_mean_of_n_best_values(
         results["#params"].append(format_num_params(num_params))
         results["depth"].append(depth_)
         results["width"].append(width_)
+        results["#heads"].append(num_heads_)
         results["ul2"].append(ul2_)
         results["causal dens"].append(causal_denoisers_)
         results["nonC mask"].append(noncausal_masking_)
