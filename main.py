@@ -528,7 +528,7 @@ def mask_spans(
     inputs = inputs.roll(1, dims=-1)
     inputs[:, 0] = mode_token
 
-    return inputs, targets, mask_tensor.bool() if return_mask else inputs, targets
+    return (inputs, targets, mask_tensor.bool()) if return_mask else (inputs, targets)
 
 
 MASKING_SETTINGS = {
