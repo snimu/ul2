@@ -413,7 +413,8 @@ def get_s_denoised_data(
         masking_rate: float = 0.5,
         causal: bool = False,
         no_special_tokens = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
+        return_mask: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if causal:
         targets = torch.zeros_like(
             sequence, 
@@ -430,6 +431,13 @@ def get_s_denoised_data(
     inputs [:, -mask_width:] = hyp['misc']['mask_token']
     inputs[:, 0] = hyp['misc']['mask_token'] if no_special_tokens else hyp['misc']['s_denoising_token']
 
+    if return_mask:
+        mask_start = inputs.shape[1] - mask_width
+        input_mask = torch.where(
+            einops.repeat(torch.arange(inputs.shape[1]), "s -> b s", b=inputs.shape[0]) < mask_start,
+            0, 1
+        ).bool()
+        return inputs, targets, input_mask 
     return inputs, targets
 
 
@@ -440,13 +448,15 @@ def get_r_denoised_data(
         masking_rate: float,
         causal: bool = False,
         no_special_tokens: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
+        return_mask: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return mask_spans(
         sequence=sequence, 
         mask_width=mask_width, 
         masking_rate=masking_rate,
         mode_token=hyp['misc']['mask_token'] if no_special_tokens else hyp['misc']['r_denoising_token'],
         causal=causal,
+        return_mask=return_mask,
     )
 
 
@@ -457,13 +467,15 @@ def get_x_denoised_data(
         masking_rate: float,
         causal: bool = False,
         no_special_tokens: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
+        return_mask: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return mask_spans(
         sequence=sequence, 
         mask_width=mask_width, 
         masking_rate=masking_rate,
         mode_token=hyp['misc']['mask_token'] if no_special_tokens else hyp['misc']['x_denoising_token'],
         causal=causal,
+        return_mask=return_mask,
     )
 
 
@@ -474,7 +486,8 @@ def mask_spans(
         masking_rate: float,
         mode_token: int,
         causal: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
+        return_mask: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if causal:
         targets = torch.zeros_like(
             sequence, 
@@ -515,7 +528,7 @@ def mask_spans(
     inputs = inputs.roll(1, dims=-1)
     inputs[:, 0] = mode_token
 
-    return inputs, targets
+    return inputs, targets, mask_tensor.bool() if return_mask else inputs, targets
 
 
 MASKING_SETTINGS = {
@@ -708,6 +721,7 @@ def calc_pplx(loss: torch.Tensor | float) -> torch.Tensor | float:
     return 2.71828 ** loss
 
 
+@torch.no_grad()
 def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tokens: bool = False):
     ####################
     # Evaluation  Mode #
@@ -726,56 +740,146 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
     val_loss_x = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
 
     
-    with torch.no_grad():
-        # Note: We eval at the maximum sequence length so that we can get an idea of how well the sequence length growing extrapolates out
-        for _ in range(num_eval_steps):
-            sequence = get_batch(data, key='eval', batchsize=eval_batchsize, length=hyp['misc']['sequence_length']['max'])
-            
-            inputs, targets = get_causal_data(sequence, no_special_tokens=no_special_tokens)
-            outputs = net(inputs, mode='causal')
-            val_loss += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
-            val_acc  += 1./num_eval_steps * (outputs.argmax(-1) == targets).float().mean()
+    # Note: We eval at the maximum sequence length so that we can get an idea of how well the sequence length growing extrapolates out
+    for _ in range(num_eval_steps):
+        sequence = get_batch(data, key='eval', batchsize=eval_batchsize, length=hyp['misc']['sequence_length']['max'])
+        
+        inputs, targets = get_causal_data(sequence, no_special_tokens=no_special_tokens)
+        outputs = net(inputs, mode='causal')
+        val_loss += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+        val_acc  += 1./num_eval_steps * (outputs.argmax(-1) == targets).float().mean()
 
-            inputs, targets = get_s_denoised_data(
-                sequence, 
-                mask_width=None, 
-                masking_rate=0.25, 
-                causal=mask_mode in ('causal', 'mixed'),
-                no_special_tokens=no_special_tokens,
-            )
-            outputs = net(inputs, mode=mask_mode)
-            val_loss_s += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+        inputs, targets = get_s_denoised_data(
+            sequence, 
+            mask_width=None, 
+            masking_rate=0.25, 
+            causal=mask_mode in ('causal', 'mixed'),
+            no_special_tokens=no_special_tokens,
+        )
+        outputs = net(inputs, mode=mask_mode)
+        val_loss_s += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
 
-            inputs, targets = get_r_denoised_data(
-                sequence, 
-                mask_width=3, 
-                masking_rate=0.15, 
-                causal=mask_mode in ('causal', 'mixed'),
-                no_special_tokens=no_special_tokens,
-            )
-            outputs = net(inputs, mode=mask_mode)
-            val_loss_r += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+        inputs, targets = get_r_denoised_data(
+            sequence, 
+            mask_width=3, 
+            masking_rate=0.15, 
+            causal=mask_mode in ('causal', 'mixed'),
+            no_special_tokens=no_special_tokens,
+        )
+        outputs = net(inputs, mode=mask_mode)
+        val_loss_r += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
 
-            inputs, targets = get_x_denoised_data(
-                sequence, 
-                mask_width=8, 
-                masking_rate=0.5, 
-                causal=mask_mode in ('causal', 'mixed'),
-                no_special_tokens=no_special_tokens,
-            )
-            outputs = net(inputs, mode=mask_mode)
-            val_loss_x += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+        inputs, targets = get_x_denoised_data(
+            sequence, 
+            mask_width=8, 
+            masking_rate=0.5, 
+            causal=mask_mode in ('causal', 'mixed'),
+            no_special_tokens=no_special_tokens,
+        )
+        outputs = net(inputs, mode=mask_mode)
+        val_loss_x += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
 
-        val_pplx = calc_pplx(val_loss)
-        val_pplx_s = calc_pplx(val_loss_s)
-        val_pplx_r = calc_pplx(val_loss_r)
-        val_pplx_x = calc_pplx(val_loss_x)
+    val_pplx = calc_pplx(val_loss)
+    val_pplx_s = calc_pplx(val_loss_s)
+    val_pplx_r = calc_pplx(val_loss_r)
+    val_pplx_x = calc_pplx(val_loss_x)
 
     return (
         val_acc.item(), val_loss.item(), val_pplx.item(),
         val_loss_s.item(), val_pplx_s.item(),
         val_loss_r.item(), val_pplx_r.item(),
         val_loss_x.item(), val_pplx_x.item(),
+    )
+
+
+@torch.no_grad()
+def measure_masked_and_causal_agreement(
+        net: SpeedyLangNet, 
+        mask_mode: Literal['causal', 'noncausal', 'mixed'], 
+        no_special_tokens: bool = False,
+) -> dict[str, int]:
+    eval_batchsize           = max(math.floor(tokens_per_batch_capacity/(hyp['misc']['sequence_length']['max'])//16), 1) # Number of sequences per batch relative to the max-length batchsize capacity, downscale factor hardcoded to help prevent OOMs. Tunable
+    num_eval_sequences       = hyp['opt']['num_eval_tokens']//hyp['misc']['sequence_length']['max']
+    num_eval_steps           = num_eval_sequences//eval_batchsize
+
+    num_toks_r, num_toks_x, num_toks_s = 0, 0, 0
+    num_agreement_r = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
+    num_agreement_x = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
+    num_agreement_s = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
+    val_acc_causal = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
+    val_acc_r_masked = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
+    val_acc_r_causal = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
+    val_acc_x_masked = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
+    val_acc_x_causal = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
+    val_acc_s_masked = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
+    val_acc_s_causal = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
+
+    for _ in range(num_eval_steps):
+        sequence = get_batch(data, key='eval', batchsize=eval_batchsize, length=hyp['misc']['sequence_length']['max'])
+
+        inputs, targets = get_causal_data(sequence, no_special_tokens=no_special_tokens)
+        outputs_causal: torch.Tensor = net(inputs)
+        val_acc_causal  += 1./num_eval_steps * (outputs_causal.argmax(-1) == targets).float().mean()
+
+        inputs, _, r_mask = get_r_denoised_data(
+            sequence, 
+            mask_width=3, 
+            masking_rate=0.15, 
+            causal=mask_mode in ('causal', 'mixed'),
+            no_special_tokens=no_special_tokens,
+            return_mask=True,
+        )
+        outputs_r: torch.Tensor = net(inputs, mode=mask_mode)
+        num_toks_r += r_mask.int().sum().item()
+        num_agreement_r += (outputs_causal.argmax(-1) == outputs_r.argmax(-1))[r_mask].int().sum()
+        val_acc_r_masked  += 1./num_eval_steps * (outputs_causal[r_mask].argmax(-1) == targets[r_mask]).float().mean()
+        val_acc_r_causal  += 1./num_eval_steps * (outputs_causal[~r_mask].argmax(-1) == targets[~r_mask]).float().mean()
+
+        inputs, _, x_mask = get_x_denoised_data(
+            sequence, 
+            mask_width=8, 
+            masking_rate=0.5, 
+            causal=mask_mode in ('causal', 'mixed'),
+            no_special_tokens=no_special_tokens,
+            return_mask=True,
+        )
+        outputs_x: torch.Tensor = net(inputs, mode=mask_mode)
+        num_toks_x += x_mask.int().sum().item()
+        num_agreement_x += (outputs_causal.argmax(-1) == outputs_x.argmax(-1))[x_mask].int().sum()
+        val_acc_x_masked  += 1./num_eval_steps * (outputs_causal[x_mask].argmax(-1) == targets[x_mask]).float().mean()
+        val_acc_x_causal  += 1./num_eval_steps * (outputs_causal[~x_mask].argmax(-1) == targets[~x_mask]).float().mean()
+
+        inputs, _, s_mask = get_s_denoised_data(
+            sequence, 
+            mask_width=None, 
+            masking_rate=0.25, 
+            causal=mask_mode in ('causal', 'mixed'),
+            no_special_tokens=no_special_tokens,
+            return_mask=True,
+        )
+        outputs_s: torch.Tensor = net(inputs, mode=mask_mode)
+        num_toks_s += s_mask.int().sum().item()
+        num_agreement_s += (outputs_causal.argmax(-1) == outputs_s.argmax(-1))[s_mask].int().sum()
+        val_acc_s_masked  += 1./num_eval_steps * (outputs_causal[s_mask].argmax(-1) == targets[s_mask]).float().mean()
+        val_acc_s_causal  += 1./num_eval_steps * (outputs_causal[~s_mask].argmax(-1) == targets[~s_mask]).float().mean()
+    
+    return dict(
+        num_toks_r=num_toks_r,
+        num_agreement_r=int(num_agreement_r),
+        val_acc_r_masked=int(val_acc_r_masked),
+        val_acc_r_causal=int(val_acc_r_causal),
+        width_r=3,
+        num_toks_x=num_toks_x,
+        num_agreement_x=int(num_agreement_x),
+        val_acc_x_masked=int(val_acc_x_masked),
+        val_acc_x_causal=int(val_acc_x_causal),
+        width_x=8,
+        num_toks_s=num_toks_s,
+        num_agreement_s=int(num_agreement_s),
+        val_acc_s_masked=int(val_acc_s_masked),
+        val_acc_s_causal=int(val_acc_s_causal),
+        width_s=int(0.25*hyp['misc']['sequence_length']['max']),
+        num_toks_total=int(hyp['misc']['sequence_length']['max']*eval_batchsize*num_eval_steps),
     )
 
 
@@ -1403,6 +1507,12 @@ def get_args() -> argparse.Namespace:
         help="If set, will use a progressive task schedule, where the task "
         "is changed every step according to a schedule that is based on the current epoch. FLAG"
     )
+    parser.add_argument(
+        "--final_eval",
+        action="store_true",
+        help="If this flag is set, a final evaluation will be performed "
+        "(see measure_masked_and_causal_agreement). FLAG"
+    )
 
     # PARSE ARGS
     args = parser.parse_args()
@@ -1676,6 +1786,18 @@ def main():
                 }
                 with open(run_name + ".metadata.json", "w") as f:
                     f.write(json.dumps(metadata))
+            
+            if args.final_eval:
+                if not args.causal_denoisers:
+                    mask_mode = "noncausal"
+                elif args.noncausal_masking:
+                    mask_mode = "mixed"
+                else:
+                    mask_mode = "causal"
+                
+                final_eval_results = measure_masked_and_causal_agreement(net, mask_mode, args.no_special_tokens)
+                
+                pl.DataFrame(final_eval_results).write_csv(run_name + ".csv")
 
             del net 
 
