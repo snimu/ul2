@@ -1307,14 +1307,6 @@ def get_args() -> argparse.Namespace:
         "TYPE: str; DEFAULT: 'speedy-lang'"
     )
 
-    # Model saving
-    parser.add_argument(
-        "-s", "--save_model",
-        action="store_true",
-        help="If this flag is set, each trained model will be saved as a .safetensors file "
-        "after training. Naming is automatic. FLAG"
-    )
-
     # How many runs per setting, how many steps/epochs/tokens to train/validate for per run
     parser.add_argument(
         "--num_runs", 
