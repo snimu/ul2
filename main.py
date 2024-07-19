@@ -797,7 +797,7 @@ def measure_masked_and_causal_agreement(
         net: SpeedyLangNet, 
         mask_mode: Literal['causal', 'noncausal', 'mixed'], 
         no_special_tokens: bool = False,
-) -> dict[str, int]:
+) -> dict[str, int | float]:
     eval_batchsize           = max(math.floor(tokens_per_batch_capacity/(hyp['misc']['sequence_length']['max'])//16), 1) # Number of sequences per batch relative to the max-length batchsize capacity, downscale factor hardcoded to help prevent OOMs. Tunable
     num_eval_sequences       = hyp['opt']['num_eval_tokens']//hyp['misc']['sequence_length']['max']
     num_eval_steps           = num_eval_sequences//eval_batchsize
@@ -821,7 +821,7 @@ def measure_masked_and_causal_agreement(
         outputs_causal: torch.Tensor = net(inputs)
         val_acc_causal  += 1./num_eval_steps * (outputs_causal.argmax(-1) == targets).float().mean()
 
-        inputs, _, r_mask = get_r_denoised_data(
+        inputs, targets, r_mask = get_r_denoised_data(
             sequence, 
             mask_width=3, 
             masking_rate=0.15, 
@@ -835,7 +835,7 @@ def measure_masked_and_causal_agreement(
         val_acc_r_masked  += 1./num_eval_steps * (outputs_causal[r_mask].argmax(-1) == targets[r_mask]).float().mean()
         val_acc_r_causal  += 1./num_eval_steps * (outputs_causal[~r_mask].argmax(-1) == targets[~r_mask]).float().mean()
 
-        inputs, _, x_mask = get_x_denoised_data(
+        inputs, targets, x_mask = get_x_denoised_data(
             sequence, 
             mask_width=8, 
             masking_rate=0.5, 
@@ -849,7 +849,7 @@ def measure_masked_and_causal_agreement(
         val_acc_x_masked  += 1./num_eval_steps * (outputs_causal[x_mask].argmax(-1) == targets[x_mask]).float().mean()
         val_acc_x_causal  += 1./num_eval_steps * (outputs_causal[~x_mask].argmax(-1) == targets[~x_mask]).float().mean()
 
-        inputs, _, s_mask = get_s_denoised_data(
+        inputs, targets, s_mask = get_s_denoised_data(
             sequence, 
             mask_width=None, 
             masking_rate=0.25, 
@@ -866,18 +866,18 @@ def measure_masked_and_causal_agreement(
     return dict(
         num_toks_r=num_toks_r,
         num_agreement_r=int(num_agreement_r),
-        val_acc_r_masked=int(val_acc_r_masked),
-        val_acc_r_causal=int(val_acc_r_causal),
+        val_acc_r_masked=float(val_acc_r_masked),
+        val_acc_r_causal=float(val_acc_r_causal),
         width_r=3,
         num_toks_x=num_toks_x,
         num_agreement_x=int(num_agreement_x),
-        val_acc_x_masked=int(val_acc_x_masked),
-        val_acc_x_causal=int(val_acc_x_causal),
+        val_acc_x_masked=float(val_acc_x_masked),
+        val_acc_x_causal=float(val_acc_x_causal),
         width_x=8,
         num_toks_s=num_toks_s,
         num_agreement_s=int(num_agreement_s),
-        val_acc_s_masked=int(val_acc_s_masked),
-        val_acc_s_causal=int(val_acc_s_causal),
+        val_acc_s_masked=float(val_acc_s_masked),
+        val_acc_s_causal=float(val_acc_s_causal),
         width_s=int(0.25*hyp['misc']['sequence_length']['max']),
         num_toks_total=int(hyp['misc']['sequence_length']['max']*eval_batchsize*num_eval_steps),
     )
