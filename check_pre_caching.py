@@ -168,3 +168,7 @@ def main():
         print(results)
     
     results.write_csv(f"probes_results{args.model_file[:-len('.safetensors')]}.csv")
+
+
+if __name__ == "__main__":
+    main()
