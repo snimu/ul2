@@ -45,9 +45,9 @@ def load_model(model_file: str) -> SpeedyLangNet:
         metadata = json.loads(f.read())
         for key, value in metadata.items():
             metadata[key] = bool(value) if key == "linear_value" else int(value)
-    model = SpeedyLangNet(make_net(metadata))
+    model = make_net(metadata)
     safetensors.torch.load_model(model, model_file)
-    return model
+    return model.to("cuda")
 
 
 @dataclass
@@ -70,6 +70,8 @@ def make_probes(model: SpeedyLangNet, num_tokens_predicted: int) -> dict[int, li
                 in_features=metadata["width"],
                 out_features=metadata["num_tokens"],
                 bias=False,
+                device="cuda",
+                dtype=torch.bfloat16,
             )
             optimizer = torch.optim.AdamW(probe.parameters())
             probes[attn_num].append(Probe(probe=probe, optimizer=optimizer))
@@ -87,21 +89,25 @@ def train_probes(
 ) -> list[Probe]:
     global metadata
     loss_fn = nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
-    for step in num_steps:
+    for step in range(num_steps):
         sequence = get_batch(data, key="train", batchsize=batchsize, length=metadata['max_sequence_length'])
-        inputs = sequence[:, :-num_tokens_predicted]
+        inputs = sequence
+        targets = sequence.roll(-1, dims=1)
 
-        x = model.net_dict['embedding'](inputs)
+        attn_mask = model.make_mask(inputs, "causal")
+        with torch.no_grad():
+            x = model.net_dict['embedding'](inputs)
         for attn_num, attn_block in enumerate(model.net_dict['attn_layers']):
-            x = attn_block(x)
-            preds = model.net_dict['norm'](x)
+            with torch.no_grad():
+                x = attn_block(x, attn_mask)
+                preds = model.net_dict['norm'](x)
             for i in range(1, num_tokens_predicted+1):
-                targets = sequence[:, i:-num_tokens_predicted+i if i<num_tokens_predicted else None]
                 probe = probes[attn_num][i-1]
                 probe.optimizer.zero_grad()
-                loss = loss_fn(probe.probe(preds), targets)
+                loss = loss_fn(probe.probe(preds).flatten(0, 1), targets.flatten(0, 1))
                 loss.backward()
                 probe.optimizer.step()
+                targets = targets.roll(-1, dims=1)
 
     return probes
 
