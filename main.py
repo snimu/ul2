@@ -1769,11 +1769,11 @@ def main():
                     filename=run_name + ".safetensors",
                 )
                 metadata = {
-                    "width": str(width),
-                    "depth": str(depth),
-                    "num_heads": str(num_heads),
-                    "linear_value": str(linear_value),
-                    "max_sequence_length": str(max_sequence_length),
+                    "width": width,
+                    "depth": depth,
+                    "num_heads": num_heads,
+                    "linear_value": linear_value,
+                    "max_sequence_length": max_sequence_length,
                     "num_tokens": hyp['misc']['num_tokens']+hyp['misc']['num_special_tokens'],
                 }
                 with open(run_name + ".metadata.json", "w") as f:
