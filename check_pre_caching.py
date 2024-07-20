@@ -43,6 +43,8 @@ def load_model(model_file: str) -> SpeedyLangNet:
     global metadata
     with open(model_file.split(".metadata.safetensors")[0]+".json", "r") as f:
         metadata = json.loads(f.read())
+        for key, value in metadata.items():
+            metadata[key] = bool(value) if key == "linear_value" else int(value)
     model = SpeedyLangNet(make_net(metadata))
     safetensors.torch.load_model(model, model_file)
     return model
