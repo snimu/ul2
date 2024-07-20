@@ -1,0 +1,2 @@
+num_toks_r,num_agreement_r,val_acc_r_masked,val_acc_r_causal,width_r,num_toks_x,num_agreement_x,val_acc_x_masked,val_acc_x_causal,width_x,num_toks_s,num_agreement_s,val_acc_s_masked,val_acc_s_causal,width_s,num_toks_total
+21341,1401,0.006357407197356224,0.0070839556865394115,3,60581,2129,0.006090256385505199,0.007550898008048534,8,38400,768,0.00619791354984045,0.00724826380610466,256,153600
