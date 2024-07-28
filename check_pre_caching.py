@@ -34,6 +34,11 @@ def get_args() -> argparse.Namespace:
         type=int, default=5,
         help="The batch-size. TYPE: int; DEFAULT: 5"
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print the results. FLAG."
+    )
 
     args = parser.parse_args()
     return args
@@ -134,20 +139,24 @@ def eval_probes(
 
     for _ in range(num_eval_steps):
         # Do the forward pass step by step.
-        x = model.net_dict['embedding']
         sequence = get_batch(data, key='eval', batchsize=batchsize, length=hyp['misc']['sequence_length']['max'])
+        inputs = sequence
+        targets = sequence.roll(-1, dims=1)
+
+        attn_mask = model.make_mask(inputs, "causal")
+        x = model.net_dict['embedding'](inputs)
 
         for attn_num, attn_block in enumerate(model.net_dict['attn_layers']):
-            x = attn_block(x)
-            preds = model.net_dict['norm'](x)
+            x = attn_block(x, attn_mask)
+            x = model.net_dict['norm'](x)
             for i in range(1, num_tokens_predicted+1):
-                targets = sequence[:, i:-num_tokens_predicted+i if i<num_tokens_predicted else None]
                 probe = probes[attn_num][i-1]
-                preds = probe.probe(preds)
-                loss = loss_fn(preds.flatten(0, 1).float, targets.flatten(0, 1)).item()
-                losses[attn_num][i] += 1./num_eval_steps * loss
+                preds = probe.probe(x)
+                loss = loss_fn(preds.flatten(0, 1).float(), targets.flatten(0, 1)).item()
+                losses[attn_num][i-1] += 1./num_eval_steps * loss
                 acc = (preds.argmax(-1) == targets).float().mean()
-                accs[attn_num][i] += 1./num_eval_steps * acc
+                accs[attn_num][i-1] += 1./num_eval_steps * acc
+                targets = targets.roll(-1, dims=1)
 
     # Flatten the results and turn them into a DataFrame
     results = {
