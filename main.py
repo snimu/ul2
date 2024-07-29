@@ -1668,6 +1668,7 @@ def main():
             title = (
                 f"::: STARTING RUN {cumulative_run_num}/{total_num_runs} "
                 f"(Setting {setting_num+1}/{len(settings)}, Run {run_num+1}/{args.num_runs})"
+                f"\n:::    logfile={args.logfile}"
                 f"\n:::    {num_heads=}"
                 f"\n:::    {linear_value=}"
                 f"\n:::    {model_scale=:.4f}"
