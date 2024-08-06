@@ -38,7 +38,7 @@ class ParquetTokenizedDataset(Dataset):
         if len(tokens) < self.sequence_length:
             padded = torch.empty((self.sequence_length,), dtype=torch.long).fill_(self.noop_token)
             padded[:len(tokens)] = tokens
-            mask[:len(tokens)] = 0
+            mask[len(tokens):] = 0
         elif len(tokens) > self.sequence_length:
             padded = tokens[:self.sequence_length]
         else:
