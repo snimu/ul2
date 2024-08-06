@@ -1,4 +1,5 @@
 
+import os
 import multiprocessing
 from typing import Literal
 
@@ -67,6 +68,8 @@ def ce_loss(logits, target, mask):
 
 
 def preprocess_and_save_dataset():
+    if os.path.exists('train_data.parquet') and os.path.exists('val_data.parquet'):
+        return
     splits = {'val': 'gpt2/val-00000-of-00001.parquet', 'train': 'gpt2/train-*.parquet'}
     df = pl.read_parquet('hf://datasets/snimu/fineweb-edu-sample-10BT-tiktokenized/' + splits['train'])
     df.write_parquet('train_data.parquet')
