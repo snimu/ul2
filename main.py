@@ -726,16 +726,19 @@ def calc_pplx(loss: torch.Tensor | float) -> torch.Tensor | float:
 
 
 @torch.no_grad()
-def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tokens: bool = False, val_dl=None, val_dl_len=None, val_dl_bs=None):
+def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tokens: bool = False, fineweb: bool = False):
     ####################
     # Evaluation  Mode #
     ####################
+
+    if fineweb:
+        _, val_dl, curr_length, _, val_batchsize = load_fineweb("fineweb", "val")
 
     # Do a slightly noisy fast eval over the max sequence length (should work okay as a rough general measurement of how we're doing)
     # Note that this is an approximation, it doesn't even necessarily use all of the requested tokens (but gets close because of the floor operation.)
     eval_batchsize           = max(math.floor(tokens_per_batch_capacity/(hyp['misc']['sequence_length']['max'])//16), 1) # Number of sequences per batch relative to the max-length batchsize capacity, downscale factor hardcoded to help prevent OOMs. Tunable
     num_eval_sequences       = hyp['opt']['num_eval_tokens']//hyp['misc']['sequence_length']['max']
-    num_eval_steps           = num_eval_sequences//eval_batchsize if val_dl is None else max(1, val_dl_len//val_dl_bs)
+    num_eval_steps           = num_eval_sequences//eval_batchsize if val_dl is None else max(1, curr_length//val_batchsize)
 
     # float32 here to prevent truncation errors
     val_loss, val_acc = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float), torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
@@ -956,24 +959,31 @@ def choose_task(
     return causal_pred, s_denoising, r_denoising, x_denoising
 
 
-def load_fineweb(dataset: Literal["wikitext", "fineweb"]):
+def load_fineweb(
+        dataset: Literal["wikitext", "fineweb"], split: Literal["train", "val"]
+):
     if dataset == "fineweb":
         curr_length = hyp['misc']['sequence_length']['max']
         curr_batchsize = tokens_per_batch_capacity // curr_length
-        train_dl = iter(fineweb_utils.get_dataloader(
-            curr_batchsize, curr_length, 
-            noop_token=hyp['misc']['noop_token'],
-            parquet_file = "train_data.parquet",
-            num_workers = multiprocessing.cpu_count(),
-        ))
-        val_dl = fineweb_utils.get_dataloader(
-            curr_batchsize, curr_length, 
-            noop_token=hyp['misc']['noop_token'],
-            parquet_file = "val_data.parquet",
-            num_workers = multiprocessing.cpu_count(),
-        )
-        val_batchsize = min(curr_batchsize, len(val_dl.dataset))  # correct batchsize automatically set in get_dataloader
-        val_dl = iter(val_dl)
+        if split == "train":
+            train_dl = iter(fineweb_utils.get_dataloader(
+                curr_batchsize, curr_length, 
+                noop_token=hyp['misc']['noop_token'],
+                parquet_file = "train_data.parquet",
+                num_workers = multiprocessing.cpu_count(),
+            ))
+            val_dl = None
+            val_batchsize = 0
+        else:
+            train_dl = None
+            val_dl = fineweb_utils.get_dataloader(
+                curr_batchsize, curr_length, 
+                noop_token=hyp['misc']['noop_token'],
+                parquet_file = "val_data.parquet",
+                num_workers = multiprocessing.cpu_count(),
+            )
+            val_batchsize = min(curr_batchsize, len(val_dl.dataset))  # correct batchsize automatically set in get_dataloader
+            val_dl = iter(val_dl)
     else:
         train_dl = val_dl = None
         curr_length = hyp['misc']['sequence_length']['initial']
@@ -1102,7 +1112,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
     else:
         mask_mode = "noncausal"
 
-    train_dl, val_dl, curr_length, curr_batchsize, val_batchsize = load_fineweb(settings["dataset"])
+    train_dl, _, curr_length, curr_batchsize, _ = load_fineweb(settings["dataset"], "train")
     
     epoch = 0.0
     # Main loop. Most of the complexity here is in the dynamic growing scheduler(s).
@@ -1195,7 +1205,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
         epoch_before = epoch
         epoch = tokens_seen/(len(data['train']) if settings["dataset"] == "wikitext" else int(1e10))
         if int(epoch) > int(epoch_before):
-            train_dl, val_dl, _, _, _ = load_fineweb(settings["dataset"])  # dl done, reload
+            train_dl, _, _, _, _ = load_fineweb(settings["dataset"])  # dl done, reload
 
         do_eval = curr_step % 10 == 0 and curr_microbatch_step % discrete_sampled_microbatch_steps == 0
             
@@ -1284,9 +1294,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 net, 
                 mask_mode=mask_mode, 
                 no_special_tokens=settings['no_special_tokens'],
-                val_dl=val_dl,
-                val_dl_len=curr_length,
-                val_dl_bs=val_batchsize,
+                fineweb=settings['dataset'] == "fineweb",
             )
 
             val_losses_causal.append(val_loss_causal)
