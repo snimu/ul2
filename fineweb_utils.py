@@ -18,7 +18,6 @@ class ParquetTokenizedDataset(Dataset):
             parquet_file: Literal["train_data.parquet", "val_data.parquet"], 
             sequence_length: int, 
             noop_token: int, 
-            device='cuda',
     ):
         global DF_TRAIN, DF_VAL
         DF_TRAIN = pl.read_parquet(parquet_file) if DF_TRAIN is None and "train" in parquet_file else DF_TRAIN
@@ -26,18 +25,17 @@ class ParquetTokenizedDataset(Dataset):
         self.parquet_file = parquet_file
         self.sequence_length = sequence_length
         self.noop_token = noop_token
-        self.device = device
 
     def __len__(self):
         return len(DF_TRAIN)
 
     def __getitem__(self, idx):
         df = DF_TRAIN if "train" in self.parquet_file else DF_VAL
-        tokens = torch.tensor(df['tokens'][idx], dtype=torch.long, device=self.device)
+        tokens = torch.tensor(df['tokens'][idx], dtype=torch.long)
         
-        mask = torch.ones((self.sequence_length,), dtype=torch.bool, device=self.device)
+        mask = torch.ones((self.sequence_length,), dtype=torch.bool)
         if len(tokens) < self.sequence_length:
-            padded = torch.empty((self.sequence_length,), dtype=torch.long, device=self.device).fill_(self.noop_token)
+            padded = torch.empty((self.sequence_length,), dtype=torch.long).fill_(self.noop_token)
             padded[:len(tokens)] = tokens
             mask[:len(tokens)] = 0
         elif len(tokens) > self.sequence_length:
@@ -53,9 +51,8 @@ def get_dataloader(
         noop_token: int, 
         parquet_file: Literal["train_data.parquet", "val_data.parquet"], 
         num_workers=4,
-        device='cuda',
 ) -> DataLoader:    
-    dataset = ParquetTokenizedDataset(parquet_file, sequence_length, noop_token, device)
+    dataset = ParquetTokenizedDataset(parquet_file, sequence_length, noop_token)
     
     return DataLoader(
         dataset,

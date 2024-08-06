@@ -750,6 +750,7 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
         else:
             try:
                 sequence, input_mask = next(val_dl)
+                sequence, input_mask = sequence.to(hyp['misc']['device']), input_mask.to(hyp['misc']['device'])
             except StopIteration:
                 break
         
@@ -964,14 +965,12 @@ def load_fineweb(dataset: Literal["wikitext", "fineweb"]):
             noop_token=hyp['misc']['noop_token'],
             parquet_file = "train_data.parquet",
             num_workers = multiprocessing.cpu_count(),
-            device=hyp['misc']['device'],
         ))
         val_dl = fineweb_utils.get_dataloader(
             curr_batchsize, curr_length, 
             noop_token=hyp['misc']['noop_token'],
             parquet_file = "val_data.parquet",
             num_workers = multiprocessing.cpu_count(),
-            device=hyp['misc']['device'],
         )
         val_length = min(curr_length, len(val_dl))
         val_dl = iter(val_dl)
@@ -1109,7 +1108,8 @@ def train(net: SpeedyLangNet | None = None, **settings):
     # Main loop. Most of the complexity here is in the dynamic growing scheduler(s).
     while True:
         if settings['dataset'] == "fineweb":
-            sequence, mask = next(train_dl)
+            sequence, input_mask = next(train_dl)
+            sequence, input_mask = sequence.to(hyp['misc']['device']), input_mask.to(hyp['misc']['device'])
         else:
             sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
 
@@ -1144,7 +1144,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
             )
             outputs = net(inputs, mode=mask_mode)
             if settings['dataset'] == "fineweb":
-                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), mask.flatten(0, 1))
+                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1))
             else:
                 loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["s_divider"]
 
@@ -1161,7 +1161,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
             )
             outputs = net(inputs, mode=mask_mode)
             if settings['dataset'] == "fineweb":
-                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), mask.flatten(0, 1))
+                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1))
             else:
                 loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["r_divider"]
 
@@ -1178,7 +1178,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
             )
             outputs = net(inputs, mode=mask_mode)
             if settings['dataset'] == "fineweb":
-                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), mask.flatten(0, 1))
+                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1))
             else:
                 loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["x_divider"]
 
@@ -1186,7 +1186,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
             inputs, targets = get_causal_data(sequence)
             outputs = net(inputs, mode='causal')
             if settings['dataset'] == "fineweb":
-                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), mask.flatten(0, 1))
+                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1))
             else:
                 loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["causal_divider"]
         
