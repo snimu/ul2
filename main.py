@@ -972,15 +972,15 @@ def load_fineweb(dataset: Literal["wikitext", "fineweb"]):
             parquet_file = "val_data.parquet",
             num_workers = multiprocessing.cpu_count(),
         )
-        val_length = min(curr_length, len(val_dl))
+        val_batchsize = min(curr_batchsize, len(val_dl.dataset))  # correct batchsize automatically set in get_dataloader
         val_dl = iter(val_dl)
     else:
         train_dl = val_dl = None
         curr_length = hyp['misc']['sequence_length']['initial']
         curr_batchsize = tokens_per_batch_capacity // hyp['misc']['sequence_length']['initial']
-        val_length = 0
+        val_batchsize = 0
 
-    return train_dl, val_dl, curr_length, val_length, curr_batchsize
+    return train_dl, val_dl, curr_length, curr_batchsize, val_batchsize
 
 
 def train(net: SpeedyLangNet | None = None, **settings):
@@ -1102,7 +1102,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
     else:
         mask_mode = "noncausal"
 
-    train_dl, val_dl, curr_length, val_length, curr_batchsize = load_fineweb(settings["dataset"])
+    train_dl, val_dl, curr_length, curr_batchsize, val_batchsize = load_fineweb(settings["dataset"])
     
     epoch = 0.0
     # Main loop. Most of the complexity here is in the dynamic growing scheduler(s).
@@ -1285,8 +1285,8 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 mask_mode=mask_mode, 
                 no_special_tokens=settings['no_special_tokens'],
                 val_dl=val_dl,
-                val_dl_len=val_length,
-                val_dl_bs=curr_batchsize,
+                val_dl_len=curr_length,
+                val_dl_bs=val_batchsize,
             )
 
             val_losses_causal.append(val_loss_causal)

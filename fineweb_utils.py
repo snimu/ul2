@@ -5,6 +5,7 @@ from typing import Literal
 
 import torch
 from torch.utils.data import Dataset, DataLoader
+import torch.nn.functional as F
 import polars as pl
 
 
@@ -27,7 +28,7 @@ class ParquetTokenizedDataset(Dataset):
         self.noop_token = noop_token
 
     def __len__(self):
-        return len(DF_TRAIN)
+        return len(DF_TRAIN) if "train" in self.parquet_file else len(DF_VAL)
 
     def __getitem__(self, idx):
         df = DF_TRAIN if "train" in self.parquet_file else DF_VAL
@@ -56,14 +57,22 @@ def get_dataloader(
     
     return DataLoader(
         dataset,
-        batch_size=batch_size,
+        batch_size=min(batch_size, len(dataset)),
         shuffle=("train" in parquet_file),
         num_workers=num_workers,
         pin_memory=True,
     )
 
 def ce_loss(logits, target, mask):
-    loss = torch.nn.functional.cross_entropy(logits.flatten(0, 1), target.flatten(0, 1), reduction='none')
+    # Reshape logits and target
+    logits = logits.view(-1, logits.size(-1))  # Shape: [22*1024, 50310]
+    target = target.view(-1)  # Shape: [22*1024]
+    mask = mask.view(-1)  # Shape: [22*1024]
+
+    # Calculate loss
+    loss = F.cross_entropy(logits, target, reduction='none')
+    
+    # Apply mask and calculate mean
     return loss[mask].mean()
 
 
