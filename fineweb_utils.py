@@ -66,7 +66,7 @@ def ce_loss(logits, target, mask):
     return loss[mask].mean()
 
 
-def preprocess_and_save_dataset(output_dir: str, batch_size: int = 1000):
+def preprocess_and_save_dataset():
     splits = {'val': 'gpt2/val-00000-of-00001.parquet', 'train': 'gpt2/train-*.parquet'}
     df = pl.read_parquet('hf://datasets/snimu/fineweb-edu-sample-10BT-tiktokenized/' + splits['train'])
     df.write_parquet('train_data.parquet')
