@@ -58,9 +58,12 @@ def create_and_push_dataset(tokenizer_name="gpt2", num_processes=None, validatio
         **{k: v for k, v in fw.features.items() if k not in ['text', 'token_count']}
     })
 
-    # Create validation dataset first
+    # Create a single generator for both validation and training
+    full_generator = data_generator(shuffled_fw, tokenizer_name, num_processes=num_processes)
+
+    # Create validation dataset
     validation_dataset = Dataset.from_generator(
-        lambda: itertools.islice(data_generator(shuffled_fw, tokenizer_name, num_processes=num_processes), validation_size),
+        lambda: itertools.islice(full_generator, validation_size),
         features=new_features,
     )
 
@@ -68,15 +71,15 @@ def create_and_push_dataset(tokenizer_name="gpt2", num_processes=None, validatio
     validation_dataset.push_to_hub(
         "snimu/fineweb-edu-sample-10BT-tiktokenized",
         config_name=tokenizer_name,
-        split="val",  # Changed from "validation" to "val"
+        split="val",
         token=hf_token
     )
 
     print(f"Validation dataset uploaded successfully. Size: {len(validation_dataset)}")
 
-    # Create train dataset
+    # Create train dataset (starting after validation samples)
     train_dataset = Dataset.from_generator(
-        lambda: data_generator(shuffled_fw, tokenizer_name, num_processes=num_processes),
+        lambda: full_generator,  # This will continue from where validation left off
         features=new_features,
     )
 
@@ -96,7 +99,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create and push tokenized dataset to Hugging Face")
     parser.add_argument("--tokenizer", type=str, default="gpt2", help="Name of the tokenizer to use")
     parser.add_argument("--processes", type=int, default=None, help="Number of processes to use (default: number of CPU cores)")
-    parser.add_argument("--validation-size", type=int, default=100, help="Size of the validation split")
+    parser.add_argument("--validation-size", type=int, default=128, help="Size of the validation split")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for shuffling")
     args = parser.parse_args()
 
