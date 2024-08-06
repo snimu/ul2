@@ -19,6 +19,7 @@ from functools import partial
 import subprocess
 import random
 import json
+import multiprocessing
 
 import zipfile
 import math
@@ -36,6 +37,8 @@ import safetensors.torch
 
 # This seems like one of the best choices right now for a fast/lightweight/simple tokenizer.
 import tiktoken
+
+import fineweb_utils
 
 
 print = rich.print
@@ -109,12 +112,13 @@ hyp = {
     },
     'misc': {
         'num_tokens': 50304, # Rounded to the nearest value of 64 for efficiency
-        'num_special_tokens': 5,
+        'num_special_tokens': 6,
         'causal_token': 50304,
         's_denoising_token': 50305,
         'x_denoising_token': 50306,
         'r_denoising_token': 50307,
         'mask_token': 50308,
+        'noop_token': 50309,
         'sequence_length': {
             'max': max_sequence_length,
             'initial': 32,      # Very short initial sequence length seems to help a lot
@@ -423,7 +427,7 @@ def get_s_denoised_data(
         ).copy_(sequence)  # copy sequence to not have negative downstream effects
     else:
         targets = sequence.roll(1)
-        targets[:, 0] = hyp['misc']['s_denoising_token']  # will be in input -> predict in output
+        targets[:, 0] = hyp['misc']['mask_token' if no_special_tokens else 's_denoising_token']
 
     mask_width = mask_width or max(1, math.floor(masking_rate * sequence.shape[-1]))
     mask_width = min(mask_width, math.floor(masking_rate * sequence.shape[-1]))
@@ -722,7 +726,7 @@ def calc_pplx(loss: torch.Tensor | float) -> torch.Tensor | float:
 
 
 @torch.no_grad()
-def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tokens: bool = False):
+def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tokens: bool = False, val_dl=None, val_dl_len=None, val_dl_bs=None):
     ####################
     # Evaluation  Mode #
     ####################
@@ -731,22 +735,30 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
     # Note that this is an approximation, it doesn't even necessarily use all of the requested tokens (but gets close because of the floor operation.)
     eval_batchsize           = max(math.floor(tokens_per_batch_capacity/(hyp['misc']['sequence_length']['max'])//16), 1) # Number of sequences per batch relative to the max-length batchsize capacity, downscale factor hardcoded to help prevent OOMs. Tunable
     num_eval_sequences       = hyp['opt']['num_eval_tokens']//hyp['misc']['sequence_length']['max']
-    num_eval_steps           = num_eval_sequences//eval_batchsize
+    num_eval_steps           = num_eval_sequences//eval_batchsize if val_dl is None else max(1, val_dl_len//val_dl_bs)
 
     # float32 here to prevent truncation errors
     val_loss, val_acc = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float), torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
     val_loss_s = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
     val_loss_r = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
     val_loss_x = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
-
     
     # Note: We eval at the maximum sequence length so that we can get an idea of how well the sequence length growing extrapolates out
     for _ in range(num_eval_steps):
-        sequence = get_batch(data, key='eval', batchsize=eval_batchsize, length=hyp['misc']['sequence_length']['max'])
+        if val_dl is None:
+            sequence = get_batch(data, key='eval', batchsize=eval_batchsize, length=hyp['misc']['sequence_length']['max'])
+        else:
+            try:
+                sequence, input_mask = next(val_dl)
+            except StopIteration:
+                break
         
         inputs, targets = get_causal_data(sequence, no_special_tokens=no_special_tokens)
         outputs = net(inputs, mode='causal')
-        val_loss += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+        if val_dl is None:
+            val_loss += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+        else:
+            val_loss += 1./num_eval_steps * fineweb_utils.ce_loss(outputs, targets, input_mask)
         val_acc  += 1./num_eval_steps * (outputs.argmax(-1) == targets).float().mean()
 
         inputs, targets = get_s_denoised_data(
@@ -757,7 +769,10 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
             no_special_tokens=no_special_tokens,
         )
         outputs = net(inputs, mode=mask_mode)
-        val_loss_s += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+        if val_dl is None:
+            val_loss_s += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+        else:
+            val_loss_s += 1./num_eval_steps * fineweb_utils.ce_loss(outputs, targets, input_mask)
 
         inputs, targets = get_r_denoised_data(
             sequence, 
@@ -767,7 +782,10 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
             no_special_tokens=no_special_tokens,
         )
         outputs = net(inputs, mode=mask_mode)
-        val_loss_r += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+        if val_dl is None:
+            val_loss_r += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+        else:
+            val_loss_r += 1./num_eval_steps * fineweb_utils.ce_loss(outputs, targets, input_mask)
 
         inputs, targets = get_x_denoised_data(
             sequence, 
@@ -777,7 +795,10 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
             no_special_tokens=no_special_tokens,
         )
         outputs = net(inputs, mode=mask_mode)
-        val_loss_x += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+        if val_dl is None:
+            val_loss_x += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+        else:
+            val_loss_x += 1./num_eval_steps * fineweb_utils.ce_loss(outputs, targets, input_mask)
 
     val_pplx = calc_pplx(val_loss)
     val_pplx_s = calc_pplx(val_loss_s)
@@ -934,6 +955,35 @@ def choose_task(
     return causal_pred, s_denoising, r_denoising, x_denoising
 
 
+def load_fineweb(dataset: Literal["wikitext", "fineweb"]):
+    if dataset == "fineweb":
+        curr_length = hyp['misc']['sequence_length']['max']
+        curr_batchsize = tokens_per_batch_capacity // curr_length
+        train_dl = iter(fineweb_utils.get_dataloader(
+            curr_batchsize, curr_length, 
+            noop_token=hyp['misc']['noop_token'],
+            parquet_file = "train_data.parquet",
+            num_workers = multiprocessing.cpu_count(),
+            device=hyp['misc']['device'],
+        ))
+        val_dl = fineweb_utils.get_dataloader(
+            curr_batchsize, curr_length, 
+            noop_token=hyp['misc']['noop_token'],
+            parquet_file = "val_data.parquet",
+            num_workers = multiprocessing.cpu_count(),
+            device=hyp['misc']['device'],
+        )
+        val_length = min(curr_length, len(val_dl))
+        val_dl = iter(val_dl)
+    else:
+        train_dl = val_dl = None
+        curr_length = hyp['misc']['sequence_length']['initial']
+        curr_batchsize = tokens_per_batch_capacity // hyp['misc']['sequence_length']['initial']
+        val_length = 0
+
+    return train_dl, val_dl, curr_length, val_length, curr_batchsize
+
+
 def train(net: SpeedyLangNet | None = None, **settings):
 
     #################
@@ -1052,11 +1102,16 @@ def train(net: SpeedyLangNet | None = None, **settings):
         mask_mode = "causal"
     else:
         mask_mode = "noncausal"
+
+    train_dl, val_dl, curr_length, val_length, curr_batchsize = load_fineweb(settings["dataset"])
     
     epoch = 0.0
     # Main loop. Most of the complexity here is in the dynamic growing scheduler(s).
     while True:
-        sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
+        if settings['dataset'] == "fineweb":
+            sequence, mask = next(train_dl)
+        else:
+            sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
 
         causal_pred, s_denoising, r_denoising, x_denoising = choose_task(
             causal_pred_enabled=causal_pred_enabled,
@@ -1088,7 +1143,10 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 no_special_tokens=settings['no_special_tokens'],
             )
             outputs = net(inputs, mode=mask_mode)
-            loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["s_divider"]
+            if settings['dataset'] == "fineweb":
+                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), mask.flatten(0, 1))
+            else:
+                loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["s_divider"]
 
         if r_denoising:
             inputs, targets = get_r_denoised_data(
@@ -1102,7 +1160,10 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 no_special_tokens=settings['no_special_tokens'],
             )
             outputs = net(inputs, mode=mask_mode)
-            loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["r_divider"]
+            if settings['dataset'] == "fineweb":
+                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), mask.flatten(0, 1))
+            else:
+                loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["r_divider"]
 
         if x_denoising:
             inputs, targets = get_x_denoised_data(
@@ -1116,16 +1177,25 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 no_special_tokens=settings['no_special_tokens'],
             )
             outputs = net(inputs, mode=mask_mode)
-            loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["x_divider"]
+            if settings['dataset'] == "fineweb":
+                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), mask.flatten(0, 1))
+            else:
+                loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["x_divider"]
 
         if causal_pred:
             inputs, targets = get_causal_data(sequence)
             outputs = net(inputs, mode='causal')
-            loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["causal_divider"]
+            if settings['dataset'] == "fineweb":
+                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), mask.flatten(0, 1))
+            else:
+                loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["causal_divider"]
         
         loss.div(discrete_sampled_microbatch_steps).backward()
         tokens_seen += curr_batchsize * curr_length
-        epoch = tokens_seen/len(data['train'])
+        epoch_before = epoch
+        epoch = tokens_seen/(len(data['train']) if settings["dataset"] == "wikitext" else int(1e10))
+        if int(epoch) > int(epoch_before):
+            train_dl, val_dl, _, _, _ = load_fineweb(settings["dataset"])  # dl done, reload
 
         do_eval = curr_step % 10 == 0 and curr_microbatch_step % discrete_sampled_microbatch_steps == 0
             
@@ -1169,7 +1239,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
             scheduler.step()
 
             # Check if we need to double our sequence length
-            if curr_step % hyp['misc']['sequence_length']['growth_steps'] == 0 and curr_step != 0 and curr_length < hyp['misc']['sequence_length']['max']:
+            if settings["dataset"] == "wikitext" and curr_step % hyp['misc']['sequence_length']['growth_steps'] == 0 and curr_step != 0 and curr_length < hyp['misc']['sequence_length']['max']:
                 curr_length, curr_batchsize = grow_sequence_length(curr_length, curr_batchsize)
 
             # The next several lines calculate a dynamic batchsize, simulated through manual dithering
@@ -1214,6 +1284,9 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 net, 
                 mask_mode=mask_mode, 
                 no_special_tokens=settings['no_special_tokens'],
+                val_dl=val_dl,
+                val_dl_len=val_length,
+                val_dl_bs=curr_batchsize,
             )
 
             val_losses_causal.append(val_loss_causal)
@@ -1505,6 +1578,11 @@ def get_args() -> argparse.Namespace:
         help="If this flag is set, a final evaluation will be performed "
         "(see measure_masked_and_causal_agreement). FLAG"
     )
+    parser.add_argument(
+        "--dataset",
+        type=str, choices=["wikitext", "fineweb"], default="wikitext",
+        help="Dataset to use. TYPE: str; DEFAULT: 'wikitext'"
+    )
 
     # PARSE ARGS
     args = parser.parse_args()
@@ -1617,6 +1695,8 @@ def make_run_name(**settings):
             run_name = "noncausal-masking_" + run_name
         if settings['progressive_tasks']:
             run_name = "progressive-tasks_" + run_name
+        
+        run_name = settings["dataset"] + "_" + run_name
 
         run_name = (
             "loss-dividers-C-S-R-X_"
@@ -1689,6 +1769,7 @@ def main():
                 f"\n:::    no_special_tokens={args.no_special_tokens}"
                 f"\n:::    alternate_denoisers={args.alternate_denoisers}"
                 f"\n:::    progressive_tasks={args.progressive_tasks}"
+                f"\n:::    dataset={args.dataset}"
             )
             max_len = max(len(line) for line in title.split("\n"))
             title = "\n".join([line + " " * (max_len - len(line)) + " :::" for line in title.split("\n")])
@@ -1712,6 +1793,7 @@ def main():
                 no_special_tokens=args.no_special_tokens,
                 alternate_denoisers=args.alternate_denoisers,
                 progressive_tasks=args.progressive_tasks,
+                dataset=args.dataset,
             )
 
             # Seed
@@ -1762,6 +1844,7 @@ def main():
                 no_special_tokens=args.no_special_tokens,
                 alternate_denoisers=args.alternate_denoisers,
                 progressive_tasks=args.progressive_tasks,
+                dataset=args.dataset,
             )
 
             if args.save_net:
@@ -1797,6 +1880,7 @@ def main():
             # Save results
             results = {
                 "last_val_loss": [last_val_loss],
+                "dataset": [args.dataset],
                 "ul2": [args.ul2],
                 "causal_denoisers": [args.causal_denoisers],
                 "noncausal_masking": [args.noncausal_masking],
@@ -1845,7 +1929,6 @@ def main():
                 "weight_decay": [str(weight_decays)],
             }
             df = pl.DataFrame(results)
-
 
             if args.log_csv:
                 if not os.path.exists(args.logfile) or ((not args.append) and (run_num == setting_num == 0)):
