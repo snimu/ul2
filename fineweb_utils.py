@@ -9,8 +9,8 @@ import polars as pl
 
 
 num_cpus = multiprocessing.cpu_count()
-DF = None  # global df to avoid loading the same parquet file multiple times; but don't load at import!
-
+DF_TRAIN = None  # global df to avoid loading the same parquet file multiple times; but don't load at import!
+DF_VAL = None
 
 class ParquetTokenizedDataset(Dataset):
     def __init__(
@@ -20,17 +20,20 @@ class ParquetTokenizedDataset(Dataset):
             noop_token: int, 
             device='cuda',
     ):
-        global DF
-        DF = pl.read_parquet(parquet_file) if DF is None else DF
+        global DF_TRAIN, DF_VAL
+        DF_TRAIN = pl.read_parquet(parquet_file) if DF_TRAIN is None and "train" in parquet_file else DF_TRAIN
+        DF_VAL = pl.read_parquet(parquet_file) if DF_VAL is None and "val" in parquet_file else DF_VAL
+        self.parquet_file = parquet_file
         self.sequence_length = sequence_length
         self.noop_token = noop_token
         self.device = device
 
     def __len__(self):
-        return len(DF)
+        return len(DF_TRAIN)
 
     def __getitem__(self, idx):
-        tokens = torch.tensor(DF['tokens'][idx], dtype=torch.long, device=self.device)
+        df = DF_TRAIN if "train" in self.parquet_file else DF_VAL
+        tokens = torch.tensor(df['tokens'][idx], dtype=torch.long, device=self.device)
         
         mask = torch.ones((self.sequence_length,), dtype=torch.bool, device=self.device)
         if len(tokens) < self.sequence_length:
