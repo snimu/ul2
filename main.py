@@ -1736,6 +1736,9 @@ def main():
     global hyp, model_scale
     change_gpu_token_capacity(args.gpu_capacity_scalar)
 
+    if args.dataset == "fineweb":
+        fineweb_utils.preprocess_and_save_dataset()
+
     for setting_num, (model_scale, depth, width, num_heads, linear_value, causal_divider, s_divider, r_divider, x_divider) in enumerate(settings):
         seed = args.seed  # reset seed so that every setting goes through the same seeds over the different runs
 
