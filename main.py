@@ -1177,7 +1177,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
     ## print out the training column headers before each run.
     global variables_to_log
     if settings["no_eval"]:
-        variables_to_log = ['epoch', 'train_loss_causal', 'train_loss_x', 'train_loss_r', 't_secs']
+        variables_to_log = ['epoch', 'train_loss_causal', 'train_loss_x', 'train_loss_r', 'train_loss_s', 't_secs']
     else:
         variables_to_log = ['epoch', 'train_loss_causal', 'val_loss_causal', 'val_loss_s', 'val_loss_x', 'val_loss_r', 't_secs']
     print_training_details(variables_to_log, column_labels_only=True)
