@@ -725,6 +725,15 @@ def calc_pplx(loss: torch.Tensor | float) -> torch.Tensor | float:
     return 2.71828 ** loss
 
 
+def calc_loss(noop_mask: torch.Tensor | None, outputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    if noop_mask is None:
+        loss = loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1))
+    else:
+        loss = fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), noop_mask.flatten(0, 1))
+
+    return loss
+
+
 @torch.no_grad()
 def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tokens: bool = False, fineweb: bool = False):
     ####################
@@ -825,10 +834,15 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
 
 
 @torch.no_grad()
-def mini_eval(net: SpeedyLangNet, sequence: torch.Tensor, no_special_token: bool):
+def mini_eval(
+        net: SpeedyLangNet, 
+        sequence: torch.Tensor, 
+        no_special_token: bool, 
+        noop_mask: torch.Tensor | None = None,
+):
     inputs, targets = get_causal_data(sequence, no_special_tokens=no_special_token)
     outputs = net(inputs)
-    causal_loss = loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+    causal_loss = calc_loss(noop_mask, outputs, targets)
     causal_pplx = calc_pplx(causal_loss)
     causal_acc = (outputs.argmax(-1) == targets).float().mean()
 
@@ -841,7 +855,7 @@ def mini_eval(net: SpeedyLangNet, sequence: torch.Tensor, no_special_token: bool
         return_mask=True,
     )
     outputs = net(inputs)
-    s_loss = loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+    s_loss = calc_loss(noop_mask, outputs, targets)
     s_pplx = calc_pplx(s_loss)
     s_acc_masked = (outputs.argmax(-1)[input_mask] == targets[input_mask]).float().mean()
     s_acc_causal = (outputs.argmax(-1)[~input_mask] == targets[~input_mask]).float().mean()
@@ -856,7 +870,7 @@ def mini_eval(net: SpeedyLangNet, sequence: torch.Tensor, no_special_token: bool
         return_mask=True,
     )
     outputs = net(inputs)
-    r_loss = loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+    r_loss = calc_loss(noop_mask, outputs, targets)
     r_pplx = calc_pplx(r_loss)
     r_acc_masked = (outputs.argmax(-1)[input_mask] == targets[input_mask]).float().mean()
     r_acc_causal = (outputs.argmax(-1)[~input_mask] == targets[~input_mask]).float().mean()
@@ -871,7 +885,7 @@ def mini_eval(net: SpeedyLangNet, sequence: torch.Tensor, no_special_token: bool
         return_mask=True,
     )
     outputs = net(inputs)
-    x_loss = loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+    x_loss = calc_loss(noop_mask, outputs, targets)
     x_pplx = calc_pplx(x_loss)
     x_acc_masked = (outputs.argmax(-1)[input_mask] == targets[input_mask]).float().mean()
     x_acc_causal = (outputs.argmax(-1)[~input_mask] == targets[~input_mask]).float().mean()
@@ -1198,10 +1212,11 @@ def train(net: SpeedyLangNet | None = None, **settings):
     # Main loop. Most of the complexity here is in the dynamic growing scheduler(s).
     while True:
         if settings['dataset'] == "fineweb":
-            sequence, input_mask = next(train_dl)
-            sequence, input_mask = sequence.to(hyp['misc']['device']), input_mask.to(hyp['misc']['device'])
+            sequence, noop_mask = next(train_dl)
+            sequence, noop_mask = sequence.to(hyp['misc']['device']), noop_mask.to(hyp['misc']['device'])
         else:
             sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
+            noop_mask = None
 
         causal_pred, s_denoising, r_denoising, x_denoising = choose_task(
             causal_pred_enabled=causal_pred_enabled,
@@ -1233,10 +1248,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 no_special_tokens=settings['no_special_tokens'],
             )
             outputs = net(inputs, mode=mask_mode)
-            if settings['dataset'] == "fineweb":
-                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1))
-            else:
-                loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["s_divider"]
+            loss += calc_loss(noop_mask, outputs, targets) / settings["s_divider"]
 
         if r_denoising:
             inputs, targets = get_r_denoised_data(
@@ -1250,10 +1262,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 no_special_tokens=settings['no_special_tokens'],
             )
             outputs = net(inputs, mode=mask_mode)
-            if settings['dataset'] == "fineweb":
-                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1))
-            else:
-                loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["r_divider"]
+            loss += calc_loss(noop_mask, outputs, targets) / settings["r_divider"]
 
         if x_denoising:
             inputs, targets = get_x_denoised_data(
@@ -1267,18 +1276,12 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 no_special_tokens=settings['no_special_tokens'],
             )
             outputs = net(inputs, mode=mask_mode)
-            if settings['dataset'] == "fineweb":
-                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1))
-            else:
-                loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["x_divider"]
+            loss += calc_loss(noop_mask, outputs, targets) / settings["x_divider"]
 
         if causal_pred:
             inputs, targets = get_causal_data(sequence)
             outputs = net(inputs, mode='causal')
-            if settings['dataset'] == "fineweb":
-                loss += fineweb_utils.ce_loss(outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1))
-            else:
-                loss += loss_fn(outputs.flatten(0, 1), targets.flatten(0, 1)) / settings["causal_divider"]
+            loss += calc_loss(noop_mask, outputs, targets) / settings["causal_divider"]
         
         loss.div(discrete_sampled_microbatch_steps).backward()
         tokens_seen += curr_batchsize * curr_length
@@ -1315,7 +1318,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 train_acc_s, train_acc_s_causal, train_acc_s_masked, train_loss_s, train_pplx_s,
                 train_acc_r, train_acc_r_causal, train_acc_r_masked, train_loss_r, train_pplx_r,
                 train_acc_x, train_acc_x_causal, train_acc_x_masked, train_loss_x, train_pplx_x,
-            ) = mini_eval(net, sequence, settings['no_special_tokens'])
+            ) = mini_eval(net, sequence, settings['no_special_tokens'], noop_mask=noop_mask)
 
             # Save in arrays
             train_losses_causal.append(train_loss_causal)
