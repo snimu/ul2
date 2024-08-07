@@ -1401,9 +1401,6 @@ def train(net: SpeedyLangNet | None = None, **settings):
             curr_step += 1
 
         if (not settings["no_eval"]) and do_eval:
-            ender.record()
-            torch.cuda.synchronize()
-
             train_loss_causal = loss.detach().cpu().item() # Update the loss for the training details printout
 
             net.eval()
@@ -1458,6 +1455,8 @@ def train(net: SpeedyLangNet | None = None, **settings):
             net.train()
 
         if do_eval:
+            ender.record()
+            torch.cuda.synchronize()
             t_secs += 1e-3 * starter.elapsed_time(ender)
             torch.cuda.synchronize()
             starter.record()
