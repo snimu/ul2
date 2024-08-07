@@ -665,7 +665,7 @@ def grow_sequence_length(old_length, old_batchsize):
 #          Logging           #
 ##############################
 
-variables_to_log = ['epoch', 'curr_step', 'train_loss_causal', 'train_loss_x', 'val_loss_causal', 'val_loss_s', 'val_loss_x', 'val_loss_r', 't_secs']
+variables_to_log = ['epoch', 'train_loss_c', 'train_loss_x', 'train_loss_r', 'val_loss_c', 'val_loss_s', 'val_loss_x', 'val_loss_r', 't_secs']
 # define the printing function and print the column heads
 def print_training_details(columns_list, separator_left='  ', separator_right='  |', column_labels_only=False, is_final_entry=False):
     output_line = "|" # start with the left bar
@@ -1096,7 +1096,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
     assert final_batchsize > 1, f"Error: Specified configuration takes up too much memory (calculated final batchsize {final_batchsize} is less than 1!)"
 
     # Validation parameters
-    val_loss_causal, val_acc, val_pplx = None, None, None
+    val_loss_c, val_acc, val_pplx = None, None, None
 
     # Get the total number of parameters in our model and use that to generate/calculate the base lr.
     total_trainable_params = sum([p.data.numel() if p.requires_grad else 0 for p in net.parameters()])
@@ -1153,6 +1153,8 @@ def train(net: SpeedyLangNet | None = None, **settings):
     batch_sizes = []
     sequence_lengths = []
     learning_rates, weight_decays = [], []
+
+    val_loss_c = val_loss_s = val_loss_r = val_loss_x = 0.0  # In case of no_eval, this enables printing
 
     #################
     # Training Mode #
@@ -1304,14 +1306,14 @@ def train(net: SpeedyLangNet | None = None, **settings):
             weight_decays.append(opt.param_groups[0]['weight_decay'])
 
             (
-                train_acc_causal, train_loss_causal, train_pplx_causal,
+                train_acc_causal, train_loss_c, train_pplx_causal,
                 train_acc_s, train_acc_s_causal, train_acc_s_masked, train_loss_s, train_pplx_s,
                 train_acc_r, train_acc_r_causal, train_acc_r_masked, train_loss_r, train_pplx_r,
                 train_acc_x, train_acc_x_causal, train_acc_x_masked, train_loss_x, train_pplx_x,
             ) = mini_eval(net, sequence, settings['no_special_tokens'])
 
             # Save in arrays
-            train_losses_causal.append(train_loss_causal)
+            train_losses_causal.append(train_loss_c)
             train_accs_causal.append(train_acc_causal)
             train_pplxs_causal.append(train_pplx_causal)
             train_losses_s.append(train_loss_s)
@@ -1333,7 +1335,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
             # save in wandb (if wandb)
             if settings['log_wandb']:
                 wandb.log({
-                    'train/loss': train_loss_causal,
+                    'train/loss': train_loss_c,
                     'train/acc': train_acc_causal,
                     'train/pplx': train_pplx_causal,
                     'train/loss/S_denoised': train_loss_s,
@@ -1350,6 +1352,9 @@ def train(net: SpeedyLangNet | None = None, **settings):
                     'learning_rate': opt.param_groups[0]['lr'],
                     'weight_decay': opt.param_groups[0]['weight_decay'],
                 })
+
+            if settings['no_eval']:  # otherwise, will be printed after val eval
+                print_training_details(format_for_table(variables_to_log, locals=locals()), is_final_entry=stop_run)
 
         # Once we've accumulated steps over all of our microbatches, take a single full-batchsize step.
         if curr_microbatch_step % discrete_sampled_microbatch_steps == 0:
@@ -1395,11 +1400,11 @@ def train(net: SpeedyLangNet | None = None, **settings):
             torch.cuda.synchronize()
 
             t_secs += 1e-3 * starter.elapsed_time(ender)
-            train_loss_causal = loss.detach().cpu().item() # Update the loss for the training details printout
+            train_loss_c = loss.detach().cpu().item() # Update the loss for the training details printout
 
             net.eval()
             (
-                val_acc, val_loss_causal, val_pplx,
+                val_acc, val_loss_c, val_pplx,
                 val_loss_s, val_pplx_s,
                 val_loss_r, val_pplx_r,
                 val_loss_x, val_pplx_x,
@@ -1410,7 +1415,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 fineweb=settings['dataset'] == "fineweb",
             )
 
-            val_losses_causal.append(val_loss_causal)
+            val_losses_causal.append(val_loss_c)
             val_losses_s.append(val_loss_s)
             val_losses_r.append(val_loss_r)
             val_losses_x.append(val_loss_x)
@@ -1422,10 +1427,10 @@ def train(net: SpeedyLangNet | None = None, **settings):
             
             if settings['log_wandb']:
                 wandb.log({
-                    'train/loss': train_loss_causal,
+                    'train/loss': train_loss_c,
                     'train/acc': train_acc_causal,
-                    'train/pplx': calc_pplx(train_loss_causal),
-                    'val/loss/causal': val_loss_causal, 
+                    'train/pplx': calc_pplx(train_loss_c),
+                    'val/loss/causal': val_loss_c, 
                     'val/acc/causal': val_acc, 
                     'val/pplx/causal': val_pplx, 
                     'val/loss/S_denoised': val_loss_s,
@@ -1455,7 +1460,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
             break
 
     return (
-        net, val_loss_causal,
+        net, val_loss_c,
         train_losses_causal, train_pplxs_causal, train_accs_causal,
         train_losses_s, train_pplxs_s,
         train_losses_r, train_pplxs_r,
