@@ -827,7 +827,7 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
 @torch.no_grad()
 def mini_eval(net: SpeedyLangNet, sequence: torch.Tensor, no_special_token: bool):
     inputs, targets = get_causal_data(sequence, no_special_tokens=no_special_token)
-    outputs = net(inputs, mode='causal')
+    outputs = net(inputs)
     causal_loss = loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
     causal_pplx = calc_pplx(causal_loss)
     causal_acc = (outputs.argmax(-1) == targets).float().mean()
@@ -840,7 +840,7 @@ def mini_eval(net: SpeedyLangNet, sequence: torch.Tensor, no_special_token: bool
         no_special_tokens=no_special_token,
         return_mask=True,
     )
-    outputs = net(inputs, mode='noncausal')
+    outputs = net(inputs)
     s_loss = loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
     s_pplx = calc_pplx(s_loss)
     s_acc_masked = (outputs.argmax(-1)[input_mask] == targets[input_mask]).float().mean()
@@ -849,13 +849,13 @@ def mini_eval(net: SpeedyLangNet, sequence: torch.Tensor, no_special_token: bool
 
     inputs, targets, input_mask = get_r_denoised_data(
         sequence, 
-        mask_width=3, 
+        mask_width=3,
         masking_rate=0.15, 
         causal=False,
         no_special_tokens=no_special_token,
         return_mask=True,
     )
-    outputs = net(inputs, mode='noncausal')
+    outputs = net(inputs)
     r_loss = loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
     r_pplx = calc_pplx(r_loss)
     r_acc_masked = (outputs.argmax(-1)[input_mask] == targets[input_mask]).float().mean()
@@ -870,7 +870,7 @@ def mini_eval(net: SpeedyLangNet, sequence: torch.Tensor, no_special_token: bool
         no_special_tokens=no_special_token,
         return_mask=True,
     )
-    outputs = net(inputs, mode='noncausal')
+    outputs = net(inputs)
     x_loss = loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
     x_pplx = calc_pplx(x_loss)
     x_acc_masked = (outputs.argmax(-1)[input_mask] == targets[input_mask]).float().mean()
