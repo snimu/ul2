@@ -1399,7 +1399,6 @@ def train(net: SpeedyLangNet | None = None, **settings):
             ender.record()
             torch.cuda.synchronize()
 
-            t_secs += 1e-3 * starter.elapsed_time(ender)
             train_loss_c = loss.detach().cpu().item() # Update the loss for the training details printout
 
             net.eval()
@@ -1451,10 +1450,12 @@ def train(net: SpeedyLangNet | None = None, **settings):
             # Print out our training details
             ## We also check to see if we're on our final eval loop (assum that max_curr_step lines up with the eval_every value) so we can print the 'bottom' of the table for each round.
             print_training_details(format_for_table(variables_to_log, locals=locals()), is_final_entry=stop_run)
+            net.train()
 
+        if do_eval:
+            t_secs += 1e-3 * starter.elapsed_time(ender)
             torch.cuda.synchronize()
             starter.record()
-            net.train()
         curr_microbatch_step += 1
         if stop_run:
             break
