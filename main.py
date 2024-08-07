@@ -665,7 +665,7 @@ def grow_sequence_length(old_length, old_batchsize):
 #          Logging           #
 ##############################
 
-variables_to_log = ['epoch', 'curr_step', 'train_loss', 'val_loss_causal', 'val_loss_s', 'val_loss_x', 'val_loss_r', 't_secs']
+variables_to_log = ['epoch', 'curr_step', 'train_loss_causal', 'train_loss_x', 'val_loss_causal', 'val_loss_s', 'val_loss_x', 'val_loss_r', 't_secs']
 # define the printing function and print the column heads
 def print_training_details(columns_list, separator_left='  ', separator_right='  |', column_labels_only=False, is_final_entry=False):
     output_line = "|" # start with the left bar
@@ -821,6 +821,67 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
         val_loss_s.item(), val_pplx_s.item(),
         val_loss_r.item(), val_pplx_r.item(),
         val_loss_x.item(), val_pplx_x.item(),
+    )
+
+
+@torch.no_grad()
+def mini_eval(net: SpeedyLangNet, sequence: torch.Tensor, no_special_token: bool):
+    inputs, targets = get_causal_data(sequence, no_special_tokens=no_special_token)
+    outputs = net(inputs, mode='causal')
+    causal_loss = loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+    causal_pplx = calc_pplx(causal_loss)
+    causal_acc = (outputs.argmax(-1) == targets).float().mean()
+
+    inputs, targets, input_mask = get_s_denoised_data(
+        sequence, 
+        mask_width=None, 
+        masking_rate=0.25, 
+        causal=False,
+        no_special_tokens=no_special_token,
+        return_mask=True,
+    )
+    outputs = net(inputs, mode='noncausal')
+    s_loss = loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+    s_pplx = calc_pplx(s_loss)
+    s_acc_masked = (outputs.argmax(-1)[input_mask] == targets[input_mask]).float().mean()
+    s_acc_causal = (outputs.argmax(-1)[~input_mask] == targets[~input_mask]).float().mean()
+    s_acc = s_acc_masked * input_mask.float().mean() + s_acc_causal * (1 - input_mask.float().mean())
+
+    inputs, targets, input_mask = get_r_denoised_data(
+        sequence, 
+        mask_width=3, 
+        masking_rate=0.15, 
+        causal=False,
+        no_special_tokens=no_special_token,
+        return_mask=True,
+    )
+    outputs = net(inputs, mode='noncausal')
+    r_loss = loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+    r_pplx = calc_pplx(r_loss)
+    r_acc_masked = (outputs.argmax(-1)[input_mask] == targets[input_mask]).float().mean()
+    r_acc_causal = (outputs.argmax(-1)[~input_mask] == targets[~input_mask]).float().mean()
+    r_acc = r_acc_masked * input_mask.float().mean() + r_acc_causal * (1 - input_mask.float().mean())
+
+    inputs, targets, input_mask = get_x_denoised_data(
+        sequence, 
+        mask_width=8, 
+        masking_rate=0.5, 
+        causal=False,
+        no_special_tokens=no_special_token,
+        return_mask=True,
+    )
+    outputs = net(inputs, mode='noncausal')
+    x_loss = loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
+    x_pplx = calc_pplx(x_loss)
+    x_acc_masked = (outputs.argmax(-1)[input_mask] == targets[input_mask]).float().mean()
+    x_acc_causal = (outputs.argmax(-1)[~input_mask] == targets[~input_mask]).float().mean()
+    x_acc = x_acc_masked * input_mask.float().mean() + x_acc_causal * (1 - input_mask.float().mean())
+
+    return (
+        causal_acc.item(), causal_loss.item(), causal_pplx.item(),
+        s_acc.item(), s_acc_causal.item(), s_acc_masked.item(), s_loss.item(), s_pplx.item(),
+        r_acc.item(), r_acc_causal.item(), r_acc_masked.item(), r_loss.item(), r_pplx.item(),
+        x_acc.item(), x_acc_causal.item(), x_acc_masked.item(), x_loss.item(), x_pplx.item(),
     )
 
 
@@ -1079,7 +1140,12 @@ def train(net: SpeedyLangNet | None = None, **settings):
     scheduler         = torch.optim.lr_scheduler.LambdaLR(opt, [k['scheduler'] for k in param_groups_dict.values()])
 
     # Save some results
-    train_losses, val_losses_causal, train_accs, val_accs, train_pplxs, val_pplxs_causal = [], [], [], [], [], []
+    train_losses_causal, val_losses_causal, train_accs_causal, val_accs, train_pplxs_causal, val_pplxs_causal = [], [], [], [], [], []
+    train_losses_x, train_losses_r, train_losses_s = [], [], []
+    train_accs_x, train_accs_r, train_accs_s = [], [], []
+    train_pplxs_x, train_pplxs_r, train_pplxs_s = [], [], []
+    train_accs_x_causal, train_accs_r_causal, train_accs_s_causal = [], [], []
+    train_accs_x_masked, train_accs_r_masked, train_accs_s_masked = [], [], []
     val_losses_x, val_losses_r, val_losses_s = [], [], []
     val_pplxs_x, val_pplxs_r, val_pplxs_s = [], [], []
     grad_norms, cumulative_time = [], []
@@ -1226,15 +1292,8 @@ def train(net: SpeedyLangNet | None = None, **settings):
             stop_run = True
 
         # Quick non-eval summary every N training steps, at the end of every microbatch group, including when we are not doing a _full eval_ here so that the resulting stats are complete
-        if do_eval:
-            train_acc          = (outputs.detach().argmax(-1) == targets).float().mean().item()
-            train_loss         = loss.detach().cpu().item()
-
+        if do_eval:  # always do training eval; no_eval only for eval eval
             grad_norm = get_grad_norm(net)
-
-            train_losses.append(train_loss)
-            train_accs.append(train_acc)
-            train_pplxs.append(float(calc_pplx(train_loss)))  # unnecessary float, but better safe than sorry
             grad_norms.append(grad_norm)
             tokens_seen_list.append(tokens_seen)
             epochs_list.append(epoch)
@@ -1244,6 +1303,53 @@ def train(net: SpeedyLangNet | None = None, **settings):
             learning_rates.append(opt.param_groups[0]['lr'])
             weight_decays.append(opt.param_groups[0]['weight_decay'])
 
+            (
+                train_acc_causal, train_loss_causal, train_pplx_causal,
+                train_acc_s, train_acc_s_causal, train_acc_s_masked, train_loss_s, train_pplx_s,
+                train_acc_r, train_acc_r_causal, train_acc_r_masked, train_loss_r, train_pplx_r,
+                train_acc_x, train_acc_x_causal, train_acc_x_masked, train_loss_x, train_pplx_x,
+            ) = mini_eval(net, sequence, settings['no_special_tokens'])
+
+            # Save in arrays
+            train_losses_causal.append(train_loss_causal)
+            train_accs_causal.append(train_acc_causal)
+            train_pplxs_causal.append(train_pplx_causal)
+            train_losses_s.append(train_loss_s)
+            train_accs_s.append(train_acc_s)
+            train_pplxs_s.append(train_pplx_s)
+            train_losses_r.append(train_loss_r)
+            train_accs_r.append(train_acc_r)
+            train_pplxs_r.append(train_pplx_r)
+            train_losses_x.append(train_loss_x)
+            train_accs_x.append(train_acc_x)
+            train_pplxs_x.append(train_pplx_x)
+            train_accs_x_causal.append(train_acc_x_causal)
+            train_accs_r_causal.append(train_acc_r_causal)
+            train_accs_s_causal.append(train_acc_s_causal)
+            train_accs_x_masked.append(train_acc_x_masked)
+            train_accs_r_masked.append(train_acc_r_masked)
+            train_accs_s_masked.append(train_acc_s_masked)
+
+            # save in wandb (if wandb)
+            if settings['log_wandb']:
+                wandb.log({
+                    'train/loss': train_loss_causal,
+                    'train/acc': train_acc_causal,
+                    'train/pplx': train_pplx_causal,
+                    'train/loss/S_denoised': train_loss_s,
+                    'train/pplx/S_denoised': train_pplx_s,
+                    'train/loss/R_denoised': train_loss_r,
+                    'train/pplx/R_denoised': train_pplx_r,
+                    'train/loss/X_denoised': train_loss_x,
+                    'train/pplx/X_denoised': train_pplx_x,
+                    'tokens_seen': tokens_seen, 
+                    'epoch': epoch,
+                    'batch_size': curr_batchsize,
+                    'sequence_length': curr_length,
+                    'cumulative_time': t_secs,
+                    'learning_rate': opt.param_groups[0]['lr'],
+                    'weight_decay': opt.param_groups[0]['weight_decay'],
+                })
 
         # Once we've accumulated steps over all of our microbatches, take a single full-batchsize step.
         if curr_microbatch_step % discrete_sampled_microbatch_steps == 0:
@@ -1284,12 +1390,12 @@ def train(net: SpeedyLangNet | None = None, **settings):
             curr_microbatch_step = 0
             curr_step += 1
 
-        if do_eval:
+        if (not settings["no_eval"]) and do_eval:
             ender.record()
             torch.cuda.synchronize()
 
             t_secs += 1e-3 * starter.elapsed_time(ender)
-            train_loss = loss.detach().cpu().item() # Update the loss for the training details printout
+            train_loss_causal = loss.detach().cpu().item() # Update the loss for the training details printout
 
             net.eval()
             (
@@ -1316,9 +1422,9 @@ def train(net: SpeedyLangNet | None = None, **settings):
             
             if settings['log_wandb']:
                 wandb.log({
-                    'train/loss': train_loss,
-                    'train/acc': train_acc,
-                    'train/pplx': calc_pplx(train_loss),
+                    'train/loss': train_loss_causal,
+                    'train/acc': train_acc_causal,
+                    'train/pplx': calc_pplx(train_loss_causal),
                     'val/loss/causal': val_loss_causal, 
                     'val/acc/causal': val_acc, 
                     'val/pplx/causal': val_pplx, 
@@ -1350,7 +1456,12 @@ def train(net: SpeedyLangNet | None = None, **settings):
 
     return (
         net, val_loss_causal,
-        train_losses, train_pplxs, train_accs,
+        train_losses_causal, train_pplxs_causal, train_accs_causal,
+        train_losses_s, train_pplxs_s,
+        train_losses_r, train_pplxs_r,
+        train_losses_x, train_pplxs_x,
+        train_accs_x_causal, train_accs_r_causal, train_accs_s_causal,
+        train_accs_x_masked, train_accs_r_masked, train_accs_s_masked,
         val_losses_causal, val_pplxs_causal, val_accs,
         val_losses_s, val_pplxs_s,
         val_losses_r, val_pplxs_r,
@@ -1598,6 +1709,11 @@ def get_args() -> argparse.Namespace:
         type=str, choices=["wikitext", "fineweb"], default="wikitext",
         help="Dataset to use. TYPE: str; DEFAULT: 'wikitext'"
     )
+    parser.add_argument(
+        "--no_eval",
+        action="store_true",
+        help="If set, no evaluation will be performed. FLAG"
+    )
 
     # PARSE ARGS
     args = parser.parse_args()
@@ -1788,6 +1904,7 @@ def main():
                 f"\n:::    alternate_denoisers={args.alternate_denoisers}"
                 f"\n:::    progressive_tasks={args.progressive_tasks}"
                 f"\n:::    dataset={args.dataset}"
+                f"\n:::    no_eval={args.no_eval}"
             )
             max_len = max(len(line) for line in title.split("\n"))
             title = "\n".join([line + " " * (max_len - len(line)) + " :::" for line in title.split("\n")])
@@ -1812,6 +1929,7 @@ def main():
                 alternate_denoisers=args.alternate_denoisers,
                 progressive_tasks=args.progressive_tasks,
                 dataset=args.dataset,
+                no_eval_args=args.no_eval,
             )
 
             # Seed
@@ -1821,7 +1939,12 @@ def main():
             # Train
             (
                 net, last_val_loss,
-                train_losses, train_pplxs, train_accs,
+                train_losses_causal, train_pplxs_causal, train_accs_causal,
+                train_losses_s, train_pplxs_s,
+                train_losses_r, train_pplxs_r,
+                train_losses_x, train_pplxs_x,
+                train_accs_x_causal, train_accs_r_causal, train_accs_s_causal,
+                train_accs_x_masked, train_accs_r_masked, train_accs_s_masked,
                 val_losses_causal, val_pplxs_causal, val_accs_causal,
                 val_losses_s, val_pplxs_s,
                 val_losses_r, val_pplxs_r,
@@ -1863,6 +1986,7 @@ def main():
                 alternate_denoisers=args.alternate_denoisers,
                 progressive_tasks=args.progressive_tasks,
                 dataset=args.dataset,
+                no_eval=args.no_eval,
             )
 
             if args.save_net:
@@ -1925,9 +2049,21 @@ def main():
                 "max_tokens": [args.max_tokens],
                 "max_time_seconds": [args.max_time_seconds],
                 "gpu_capacity_scalar": [args.gpu_capacity_scalar],
-                "train_loss": [str(train_losses)],
-                "train_pplx": [str(train_pplxs)],
-                "train_acc": [str(train_accs)],
+                "train_loss_causal": [str(train_losses_causal)],
+                "train_pplx_causal": [str(train_pplxs_causal)],
+                "train_acc_causal": [str(train_accs_causal)],
+                "train_loss_s": [str(train_losses_s)],
+                "train_pplx_s": [str(train_pplxs_s)],
+                "train_loss_r": [str(train_losses_r)],
+                "train_pplx_r": [str(train_pplxs_r)],
+                "train_loss_x": [str(train_losses_x)],
+                "train_pplx_x": [str(train_pplxs_x)],
+                "train_acc_x_causal": [str(train_accs_x_causal)],
+                "train_acc_r_causal": [str(train_accs_r_causal)],
+                "train_acc_s_causal": [str(train_accs_s_causal)],
+                "train_acc_x_masked": [str(train_accs_x_masked)],
+                "train_acc_r_masked": [str(train_accs_r_masked)],
+                "train_acc_s_masked": [str(train_accs_s_masked)],
                 "val_loss_causal": [str(val_losses_causal)],
                 "val_pplx_causal": [str(val_pplxs_causal)],
                 "val_acc_causal": [str(val_accs_causal)],
