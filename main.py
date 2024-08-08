@@ -1825,7 +1825,7 @@ def print_settings(settings: list[tuple], names: list[str] = None):
 
 
 def make_run_name(**settings):
-    run_name = f"depth_{settings['depth']}_width_{settings['width']}_seed_{settings['seed']}"
+    run_name = f"depth_{settings['depth']}_width_{settings['width']}_num_heads_{settings['num_heads']}_seed_{settings['seed']}"
     if settings['ul2']:
         if settings['randomize_denoiser_settings']:
             run_name = "random-denoiser-settings_" + run_name
@@ -1928,6 +1928,7 @@ def main():
             run_name = make_run_name(
                 depth=depth,
                 width=width,
+                num_heads=num_heads,
                 seed=seed,
                 ul2=args.ul2,
                 causal_denoisers=args.causal_denoisers,
