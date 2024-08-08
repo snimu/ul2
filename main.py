@@ -1212,7 +1212,11 @@ def train(net: SpeedyLangNet | None = None, **settings):
     # Main loop. Most of the complexity here is in the dynamic growing scheduler(s).
     while True:
         if settings['dataset'] == "fineweb":
-            sequence, noop_mask = next(train_dl)
+            try:
+                sequence, noop_mask = next(train_dl)
+            except StopIteration:
+                train_dl, _, _, _, _ = load_fineweb(settings["dataset"], "train")
+                continue
             sequence, noop_mask = sequence.to(hyp['misc']['device']), noop_mask.to(hyp['misc']['device'])
         else:
             sequence = get_batch(data, key='train', batchsize=curr_batchsize, length=curr_length)
