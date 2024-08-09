@@ -1292,7 +1292,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
         epoch_before = epoch
         epoch = tokens_seen/(len(data['train']) if settings["dataset"] == "wikitext" else int(1e10))
         if int(epoch) > int(epoch_before):
-            train_dl, _, _, _, _ = load_fineweb(settings["dataset"])  # dl done, reload
+            train_dl, _, _, _, _ = load_fineweb(settings["dataset"], "train")  # dl done, reload
 
         do_eval = curr_step % 10 == 0 and curr_microbatch_step % discrete_sampled_microbatch_steps == 0
             
