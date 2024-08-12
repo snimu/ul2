@@ -88,11 +88,10 @@ def train_val_split(val_set_size: int, split_randomly: bool = False):
     # 2. Overwrite val_data.parquet with them
     # 3. Remove them from train_data.parquet
 
-    if not os.path.exists('train_data.parquet') or not os.path.exists('val_data.parquet'):
+    if not os.path.exists('train_data.parquet'):
         preprocess_and_save_dataset()
 
     df_train = pl.read_parquet('train_data.parquet')
-    df_val = pl.read_parquet('val_data.parquet')
     if split_randomly:
         df_val = df_train.sample(val_set_size)
     else:
