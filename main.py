@@ -1421,18 +1421,20 @@ def train(net: SpeedyLangNet | None = None, **settings):
         if (not settings["no_eval"]) and do_eval:
             train_loss_causal = loss.detach().cpu().item() # Update the loss for the training details printout
 
-            net.eval()
-            (
-                val_acc, val_loss_causal, val_pplx,
-                val_loss_s, val_pplx_s,
-                val_loss_r, val_pplx_r,
-                val_loss_x, val_pplx_x,
-            ) = eval(
-                net, 
-                mask_mode=mask_mode, 
-                no_special_tokens=settings['no_special_tokens'],
-                fineweb=settings['dataset'] == "fineweb",
-            )
+            if curr_step % settings['eval_every'] == 0 and val_losses_causal:
+                # Only update those every n steps, otherwise just keep the last value
+                net.eval()
+                (
+                    val_acc, val_loss_causal, val_pplx,
+                    val_loss_s, val_pplx_s,
+                    val_loss_r, val_pplx_r,
+                    val_loss_x, val_pplx_x,
+                ) = eval(
+                    net, 
+                    mask_mode=mask_mode, 
+                    no_special_tokens=settings['no_special_tokens'],
+                    fineweb=settings['dataset'] == "fineweb",
+                )
 
             val_losses_causal.append(val_loss_causal)
             val_losses_s.append(val_loss_s)
@@ -1468,7 +1470,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 })
 
             # Print out our training details
-            ## We also check to see if we're on our final eval loop (assum that max_curr_step lines up with the eval_every value) so we can print the 'bottom' of the table for each round.
+            ## We also check to see if we're on our final eval loop (assume that max_curr_step lines up with the eval_every value) so we can print the 'bottom' of the table for each round.
             print_training_details(format_for_table(variables_to_log, locals=locals()), is_final_entry=stop_run)
             net.train()
 
@@ -1742,6 +1744,10 @@ def get_args() -> argparse.Namespace:
         action="store_true",
         help="If set, no evaluation will be performed. FLAG"
     )
+    parser.add_argument(
+        "--eval_every",
+        type=int, default=50,
+    )
 
     # PARSE ARGS
     args = parser.parse_args()
@@ -1933,6 +1939,7 @@ def main():
                 f"\n:::    progressive_tasks={args.progressive_tasks}"
                 f"\n:::    dataset={args.dataset}"
                 f"\n:::    no_eval={args.no_eval}"
+                f"\n:::    eval_every={args.eval_every}"
             )
             max_len = max(len(line) for line in title.split("\n"))
             title = "\n".join([line + " " * (max_len - len(line)) + " :::" for line in title.split("\n")])
@@ -2016,6 +2023,7 @@ def main():
                 progressive_tasks=args.progressive_tasks,
                 dataset=args.dataset,
                 no_eval=args.no_eval,
+                eval_every=args.eval_every,
             )
 
             if args.save_net:
