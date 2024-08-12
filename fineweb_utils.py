@@ -87,6 +87,9 @@ def train_val_split(val_set_size: int, split_randomly: bool = False):
     if not os.path.exists('train_data.parquet'):
         preprocess_and_save_dataset()
 
+    if os.path.exists('val_data.parquet'):
+        return
+
     # Read only the 'id' column from the full dataset
     df_ids = pl.scan_parquet('train_data.parquet').select('id')
 
