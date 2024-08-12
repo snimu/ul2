@@ -839,6 +839,7 @@ def mini_eval(
         sequence: torch.Tensor, 
         no_special_token: bool, 
         noop_mask: torch.Tensor | None = None,
+        mask_mode: Literal['causal', 'noncausal', 'mixed'] = "causal",
 ):
     inputs, targets = get_causal_data(sequence, no_special_tokens=no_special_token)
     outputs = net(inputs)
@@ -850,7 +851,7 @@ def mini_eval(
         sequence, 
         mask_width=None, 
         masking_rate=0.25, 
-        causal=False,
+        causal=mask_mode in ('causal', 'mixed'),
         no_special_tokens=no_special_token,
         return_mask=True,
     )
@@ -865,7 +866,7 @@ def mini_eval(
         sequence, 
         mask_width=3,
         masking_rate=0.15, 
-        causal=False,
+        causal=mask_mode in ('causal', 'mixed'),
         no_special_tokens=no_special_token,
         return_mask=True,
     )
@@ -880,7 +881,7 @@ def mini_eval(
         sequence, 
         mask_width=8, 
         masking_rate=0.5, 
-        causal=False,
+        causal=mask_mode in ('causal', 'mixed'),
         no_special_tokens=no_special_token,
         return_mask=True,
     )
@@ -1322,7 +1323,10 @@ def train(net: SpeedyLangNet | None = None, **settings):
                 train_acc_s, train_acc_s_causal, train_acc_s_masked, train_loss_s, train_pplx_s,
                 train_acc_r, train_acc_r_causal, train_acc_r_masked, train_loss_r, train_pplx_r,
                 train_acc_x, train_acc_x_causal, train_acc_x_masked, train_loss_x, train_pplx_x,
-            ) = mini_eval(net, sequence, settings['no_special_tokens'], noop_mask=noop_mask)
+            ) = mini_eval(
+                net, sequence, settings['no_special_tokens'], 
+                noop_mask=noop_mask, mask_mode=mask_mode,
+            )
 
             # Save in arrays
             train_losses_causal.append(train_loss_causal)
