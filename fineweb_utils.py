@@ -77,11 +77,27 @@ def ce_loss(logits, target, mask):
 
 
 def preprocess_and_save_dataset():
-    if os.path.exists('train_data.parquet') and os.path.exists('val_data.parquet'):
+    if os.path.exists('train_data.parquet'):
         return
-    splits = {'val': 'gpt2/val-00000-of-00001.parquet', 'train': 'gpt2/train-*.parquet'}
-    df = pl.read_parquet('hf://datasets/snimu/fineweb-edu-sample-10BT-tiktokenized/' + splits['train'])
+    df = pl.read_parquet('hf://datasets/snimu/fineweb-edu-sample-10BT-tiktokenized/gpt2/train-*.parquet')
     df.write_parquet('train_data.parquet')
-    del df
-    df = pl.read_parquet('hf://datasets/snimu/fineweb-edu-sample-10BT-tiktokenized/' + splits['val'])
-    df.write_parquet('val_data.parquet')
+
+
+def train_val_split(val_set_size: int, split_randomly: bool = False):
+    # 1. Load val_set_size rows from train_data.parquet
+    # 2. Overwrite val_data.parquet with them
+    # 3. Remove them from train_data.parquet
+
+    if not os.path.exists('train_data.parquet') or not os.path.exists('val_data.parquet'):
+        preprocess_and_save_dataset()
+
+    df_train = pl.read_parquet('train_data.parquet')
+    df_val = pl.read_parquet('val_data.parquet')
+    if split_randomly:
+        df_val = df_train.sample(val_set_size)
+    else:
+        df_val = df_train.head(val_set_size)
+
+    df_val.write_parquet('val_data.parquet')
+    df_train = df_train.drop(df_val)
+    df_train.write_parquet('train_data.parquet')
