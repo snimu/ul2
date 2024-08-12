@@ -1421,7 +1421,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
         if (not settings["no_eval"]) and do_eval:
             train_loss_causal = loss.detach().cpu().item() # Update the loss for the training details printout
 
-            if curr_step % settings['eval_every'] == 0 or not val_losses_causal:
+            if (curr_step-1) % settings['eval_every'] == 0 or not val_losses_causal:
                 # Only update those every n steps, otherwise just keep the last value
                 net.eval()
                 (
