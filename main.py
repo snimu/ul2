@@ -742,6 +742,8 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
 
     if fineweb:
         _, val_dl, curr_length, _, val_batchsize = load_fineweb("fineweb", "val")
+    else: 
+        val_dl = None
 
     # Do a slightly noisy fast eval over the max sequence length (should work okay as a rough general measurement of how we're doing)
     # Note that this is an approximation, it doesn't even necessarily use all of the requested tokens (but gets close because of the floor operation.)
