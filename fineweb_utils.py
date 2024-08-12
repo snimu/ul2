@@ -84,19 +84,25 @@ def preprocess_and_save_dataset():
 
 
 def train_val_split(val_set_size: int, split_randomly: bool = False):
-    # 1. Load val_set_size rows from train_data.parquet
-    # 2. Overwrite val_data.parquet with them
-    # 3. Remove them from train_data.parquet
-
     if not os.path.exists('train_data.parquet'):
         preprocess_and_save_dataset()
 
-    df_train = pl.read_parquet('train_data.parquet')
-    if split_randomly:
-        df_val = df_train.sample(val_set_size)
-    else:
-        df_val = df_train.head(val_set_size)
+    # Read only the 'id' column from the full dataset
+    df_ids = pl.scan_parquet('train_data.parquet').select('id')
 
+    if split_randomly:
+        val_ids = df_ids.sample(val_set_size).collect()['id']
+    else:
+        val_ids = df_ids.head(val_set_size).collect()['id']
+
+    # Read and write validation set
+    df_val = pl.scan_parquet('train_data.parquet').filter(pl.col('id').is_in(val_ids)).collect()
     df_val.write_parquet('val_data.parquet')
-    df_train = df_train.drop(df_val)
-    df_train.write_parquet('train_data.parquet')
+
+    # Update train set by removing validation IDs
+    (pl.scan_parquet('train_data.parquet')
+     .filter(~pl.col('id').is_in(val_ids))
+     .sink_parquet('train_data_updated.parquet'))
+
+    # Replace the old train file with the updated one
+    os.replace('train_data_updated.parquet', 'train_data.parquet')
