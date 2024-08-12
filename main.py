@@ -758,7 +758,7 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
     val_loss_x = torch.tensor(0., device=hyp['misc']['device'], dtype=torch.float)
     
     # Note: We eval at the maximum sequence length so that we can get an idea of how well the sequence length growing extrapolates out
-    for _ in range(num_eval_steps):
+    for i in range(num_eval_steps):
         if val_dl is None:
             sequence = get_batch(data, key='eval', batchsize=eval_batchsize, length=hyp['misc']['sequence_length']['max'])
         else:
@@ -766,6 +766,11 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
                 sequence, input_mask = next(val_dl)
                 sequence, input_mask = sequence.to(hyp['misc']['device']), input_mask.to(hyp['misc']['device'])
             except StopIteration:
+                val_loss /= (i+1)
+                val_acc  /= (i+1)
+                val_loss_s /= (i+1)
+                val_loss_r /= (i+1)
+                val_loss_x /= (i+1)
                 break
         
         inputs, targets = get_causal_data(sequence, no_special_tokens=no_special_tokens)
@@ -774,8 +779,8 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
             val_loss += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
             val_acc  += 1./num_eval_steps * (outputs.argmax(-1) == targets).float().mean()
         else:
-            val_loss += 1./num_eval_steps * fineweb_utils.ce_loss(outputs, targets, input_mask)
-            val_acc  += 1./num_eval_steps * (outputs.argmax(-1)[input_mask] == targets[input_mask]).float().mean()
+            val_loss += fineweb_utils.ce_loss(outputs, targets, input_mask)
+            val_acc  += (outputs.argmax(-1)[input_mask] == targets[input_mask]).float().mean()
 
         inputs, targets = get_s_denoised_data(
             sequence, 
@@ -788,7 +793,7 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
         if val_dl is None:
             val_loss_s += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
         else:
-            val_loss_s += 1./num_eval_steps * fineweb_utils.ce_loss(
+            val_loss_s += fineweb_utils.ce_loss(
                 outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1)
             )
 
@@ -803,7 +808,7 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
         if val_dl is None:
             val_loss_r += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
         else:
-            val_loss_r += 1./num_eval_steps * fineweb_utils.ce_loss(
+            val_loss_r += fineweb_utils.ce_loss(
                 outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1)
             )
 
@@ -818,7 +823,7 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
         if val_dl is None:
             val_loss_x += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
         else:
-            val_loss_x += 1./num_eval_steps * fineweb_utils.ce_loss(
+            val_loss_x += fineweb_utils.ce_loss(
                 outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1)
             )
 
