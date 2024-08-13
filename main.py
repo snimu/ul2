@@ -766,11 +766,15 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
                 sequence, input_mask = next(val_dl)
                 sequence, input_mask = sequence.to(hyp['misc']['device']), input_mask.to(hyp['misc']['device'])
             except StopIteration:
-                val_loss /= (i+1)
-                val_acc  /= (i+1)
-                val_loss_s /= (i+1)
-                val_loss_r /= (i+1)
-                val_loss_x /= (i+1)
+                # The calculation of num_eval_steps is not perfect, so we may need to break early
+                # Divide by i, not i+1: 
+                # - if we break at i==0, we should raise an error (no eval occured)
+                # - otherwise, we have done i eval steps
+                val_loss /= i
+                val_acc  /= i
+                val_loss_s /= i
+                val_loss_r /= i
+                val_loss_x /= i
                 break
         
         inputs, targets = get_causal_data(sequence, no_special_tokens=no_special_tokens)
