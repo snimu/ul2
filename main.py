@@ -763,8 +763,8 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
             sequence = get_batch(data, key='eval', batchsize=eval_batchsize, length=hyp['misc']['sequence_length']['max'])
         else:
             try:
-                sequence, input_mask = next(val_dl)
-                sequence, input_mask = sequence.to(hyp['misc']['device']), input_mask.to(hyp['misc']['device'])
+                sequence, noop_mask = next(val_dl)
+                sequence, noop_mask = sequence.to(hyp['misc']['device']), noop_mask.to(hyp['misc']['device'])
             except StopIteration:
                 # The calculation of num_eval_steps is not perfect, so we may need to break early
                 # Divide by i, not i+1: 
@@ -783,8 +783,8 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
             val_loss += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
             val_acc  += 1./num_eval_steps * (outputs.argmax(-1) == targets).float().mean()
         else:
-            val_loss += fineweb_utils.ce_loss(outputs, targets, input_mask)
-            val_acc  += (outputs.argmax(-1)[input_mask] == targets[input_mask]).float().mean()
+            val_loss += calc_loss(noop_mask, outputs, targets)
+            val_acc  += (outputs.argmax(-1)[noop_mask] == targets[noop_mask]).float().mean()
 
         inputs, targets = get_s_denoised_data(
             sequence, 
@@ -797,9 +797,7 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
         if val_dl is None:
             val_loss_s += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
         else:
-            val_loss_s += fineweb_utils.ce_loss(
-                outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1)
-            )
+            val_loss_s += calc_loss(noop_mask, outputs, targets)
 
         inputs, targets = get_r_denoised_data(
             sequence, 
@@ -812,9 +810,7 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
         if val_dl is None:
             val_loss_r += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
         else:
-            val_loss_r += fineweb_utils.ce_loss(
-                outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1)
-            )
+            val_loss_r += calc_loss(noop_mask, outputs, targets)
 
         inputs, targets = get_x_denoised_data(
             sequence, 
@@ -827,9 +823,7 @@ def eval(net, mask_mode: Literal['causal', 'noncausal', 'mixed'], no_special_tok
         if val_dl is None:
             val_loss_x += 1./num_eval_steps * loss_fn(outputs.flatten(0, 1).float(), targets.flatten(0, 1))
         else:
-            val_loss_x += fineweb_utils.ce_loss(
-                outputs.flatten(0, 1), targets.flatten(0, 1), input_mask.flatten(0, 1)
-            )
+            val_loss_x += calc_loss(noop_mask, outputs, targets)
 
     val_pplx = calc_pplx(val_loss)
     val_pplx_s = calc_pplx(val_loss_s)
