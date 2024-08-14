@@ -846,6 +846,8 @@ def mini_eval(
         noop_mask: torch.Tensor | None = None,
         mask_mode: Literal['causal', 'noncausal', 'mixed'] = "causal",
 ):
+    net.eval()
+    
     inputs, targets = get_causal_data(sequence, no_special_tokens=no_special_token)
     outputs = net(inputs)
     causal_loss = calc_loss(noop_mask, outputs, targets)
@@ -896,6 +898,8 @@ def mini_eval(
     x_acc_masked = (outputs.argmax(-1)[input_mask] == targets[input_mask]).float().mean()
     x_acc_causal = (outputs.argmax(-1)[~input_mask] == targets[~input_mask]).float().mean()
     x_acc = x_acc_masked * input_mask.float().mean() + x_acc_causal * (1 - input_mask.float().mean())
+
+    net.train()
 
     return (
         causal_acc.item(), causal_loss.item(), causal_pplx.item(),
