@@ -339,7 +339,7 @@ class SpeedyLangNet(nn.Module):
             # ]
             attn_mask = attn_mask | causal_mask[:x.shape[1], :x.shape[1]].unsqueeze(0)
             # x: [
-            #       [1, 1, 1, 0], 
+            #       [1, 0, 0, 0], 
             #       [1, 1, 1, 0],
             #       [1, 1, 1, 0],
             #       [1, 1, 1, 1]
