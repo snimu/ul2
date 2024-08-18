@@ -1033,7 +1033,7 @@ def choose_task(
     num_active = max(1, num_active)
     start_distr = torch.tensor([4, 3, 2, 1], dtype=torch.bfloat16, device=hyp['misc']['device'])
     end_distr = start_distr.flip(0)
-    distr = torch.lerp(start_distr, end_distr, curr_epoch/max_epochs)
+    distr = torch.lerp(start_distr, end_distr, min(1.0, curr_epoch/max_epochs))
     distr = distr / distr.sum()
     
     values = [
