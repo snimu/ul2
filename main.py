@@ -1298,7 +1298,8 @@ def train(net: SpeedyLangNet | None = None, **settings):
             loss += calc_loss(noop_mask, outputs, targets) / settings["causal_divider"]
         
         loss.div(discrete_sampled_microbatch_steps).backward()
-        tokens_seen += curr_batchsize * curr_length
+        perc_ops = 1.0 if settings["dataset"] == "wikitext" else noop_mask.float().mean().item()
+        tokens_seen += round(curr_batchsize * curr_length * perc_ops)  # If fineweb is used, don't count noops in input.
         epoch_before = epoch
         epoch = tokens_seen/(len(data['train']) if settings["dataset"] == "wikitext" else int(1e10))
         if int(epoch) > int(epoch_before):
