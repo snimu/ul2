@@ -1753,7 +1753,7 @@ def get_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--lr_mult",
-        type=float, default=1.0,
+        type=float, default=1.0, nargs="+",
         help="Multiplier for the learning rate. TYPE: float; DEFAULT: 1.0"
     )
 
@@ -1772,6 +1772,7 @@ def get_args() -> argparse.Namespace:
     args.s_divider = [args.s_divider] if isinstance(args.s_divider, float) else args.s_divider
     args.r_divider = [args.r_divider] if isinstance(args.r_divider, float) else args.r_divider
     args.x_divider = [args.x_divider] if isinstance(args.x_divider, float) else args.x_divider
+    args.lr_mult = [args.lr_mult] if isinstance(args.lr_mult, float) else args.lr_mult
 
     args.model_scale = [args.model_scale] if isinstance(args.model_scale, float) else args.model_scale
     args.linear_value = [args.linear_value] if isinstance(args.linear_value, int) else args.linear_value
@@ -1813,7 +1814,7 @@ def get_settings(args: argparse.Namespace) -> list:
     # and you can handle that here.
 
     settings =  list(itertools.product(
-        args.model_scale, args.depth, args.width, args.num_heads, args.linear_value
+        args.model_scale, args.depth, args.width, args.num_heads, args.lr_mult, args.linear_value
     ))
 
     if args.ul2 and args.loss_divider_method == "product":
@@ -1828,8 +1829,8 @@ def get_settings(args: argparse.Namespace) -> list:
         settings_loss_dividers = [(1., 0., 0., 0.)]
 
     settings = [
-        (model_scale, depth, width, num_heads, linear_value, causal_divider, s_divider, r_divider, x_divider) 
-        for model_scale, depth, width, num_heads, linear_value in settings 
+        (model_scale, depth, width, num_heads, lr_mult, linear_value, causal_divider, s_divider, r_divider, x_divider) 
+        for model_scale, depth, width, num_heads, lr_mult, linear_value in settings 
         for causal_divider, s_divider, r_divider, x_divider in settings_loss_dividers
         if not setting_violates_rules(
             model_scale=model_scale, 
@@ -1895,7 +1896,7 @@ def main():
     if args.review_settings:
         print_settings(
             settings, names=[
-                "model_scale", "depth", "width", "num_heads", "linear_value",
+                "model_scale", "depth", "width", "num_heads", "lr_mult", "linear_value",
                 "ul2", "causal_denoisers", "causal_divider", "s_divider", "r_divider", "x_divider",
                 "randomize_denoiser_settings", "randomize_mask_width", "save_net", "no_special_tokens",
                 "alternate_denoisers",
@@ -1915,7 +1916,7 @@ def main():
     if args.dataset == "fineweb":
         fineweb_utils.train_val_split(64)
 
-    for setting_num, (model_scale, depth, width, num_heads, linear_value, causal_divider, s_divider, r_divider, x_divider) in enumerate(settings):
+    for setting_num, (model_scale, depth, width, num_heads, lr_mult, linear_value, causal_divider, s_divider, r_divider, x_divider) in enumerate(settings):
         seed = args.seed  # reset seed so that every setting goes through the same seeds over the different runs
 
         # Change the model scale; width is rounded to nearest 64, and both are None if scaled by model_scale -> get depth and width here
@@ -1951,7 +1952,7 @@ def main():
                 f"\n:::    dataset={args.dataset}"
                 f"\n:::    no_eval={args.no_eval}"
                 f"\n:::    eval_every={args.eval_every}"
-                f"\n:::    lr_mult={args.lr_mult}"
+                f"\n:::    {lr_mult=}"
             )
             max_len = max(len(line) for line in title.split("\n"))
             title = "\n".join([line + " " * (max_len - len(line)) + " :::" for line in title.split("\n")])
@@ -1978,7 +1979,7 @@ def main():
                 progressive_tasks=args.progressive_tasks,
                 dataset=args.dataset,
                 no_eval_args=args.no_eval,
-                lr_mult=args.lr_mult,
+                lr_mult=lr_mult,
             )
 
             # Seed
@@ -2037,7 +2038,7 @@ def main():
                 dataset=args.dataset,
                 no_eval=args.no_eval,
                 eval_every=args.eval_every,
-                lr_mult=args.lr_mult,
+                lr_mult=lr_mult,
             )
 
             if args.save_net:
@@ -2092,7 +2093,7 @@ def main():
                 "num_params": [num_params],
                 "num_non_embedding_params": [num_non_embedding_params],
                 "num_heads": [num_heads],
-                "lr_mult": [args.lr_mult],
+                "lr_mult": [lr_mult],
                 "linear_value": [linear_value],
                 "seed": [seed],
                 "run_num": [run_num+1],
