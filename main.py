@@ -1145,7 +1145,7 @@ def train(net: SpeedyLangNet | None = None, **settings):
     # of making arbitrary models between 45M and 1.5B
 
     # A very, very pared down version of the gpt-3 training lr scaling rule roughly fit. It's used as a loose general base for the run LRs.
-    base_lr = 9e7 / math.log(total_trainable_params)**8.8
+    base_lr = 9e7 / math.log(total_trainable_params)**8.8 * settings['lr_mult']
 
     # The base value that we raise to the value of our loss in order to determine how much weight decay we need (exponentially strong as we approach 0.)
     weight_decay_pow_base = .007 * ((.01 * math.log(total_trainable_params))) ** (-4)
@@ -1751,6 +1751,11 @@ def get_args() -> argparse.Namespace:
         "--eval_every",
         type=int, default=50,
     )
+    parser.add_argument(
+        "--lr_mult",
+        type=float, default=1.0,
+        help="Multiplier for the learning rate. TYPE: float; DEFAULT: 1.0"
+    )
 
     # PARSE ARGS
     args = parser.parse_args()
@@ -1850,6 +1855,9 @@ def print_settings(settings: list[tuple], names: list[str] = None):
 
 def make_run_name(**settings):
     run_name = f"depth_{settings['depth']}_width_{settings['width']}_num_heads_{settings['num_heads']}_seed_{settings['seed']}"
+
+    if settings['lr_mult'] != 1.0:
+        run_name += f"_lr-mult_{settings['lr_mult']}"
     if settings['ul2']:
         if settings['randomize_denoiser_settings']:
             run_name = "random-denoiser-settings_" + run_name
@@ -1943,6 +1951,7 @@ def main():
                 f"\n:::    dataset={args.dataset}"
                 f"\n:::    no_eval={args.no_eval}"
                 f"\n:::    eval_every={args.eval_every}"
+                f"\n:::    lr_mult={args.lr_mult}"
             )
             max_len = max(len(line) for line in title.split("\n"))
             title = "\n".join([line + " " * (max_len - len(line)) + " :::" for line in title.split("\n")])
@@ -1969,6 +1978,7 @@ def main():
                 progressive_tasks=args.progressive_tasks,
                 dataset=args.dataset,
                 no_eval_args=args.no_eval,
+                lr_mult=args.lr_mult,
             )
 
             # Seed
@@ -2027,6 +2037,7 @@ def main():
                 dataset=args.dataset,
                 no_eval=args.no_eval,
                 eval_every=args.eval_every,
+                lr_mult=args.lr_mult,
             )
 
             if args.save_net:
@@ -2081,6 +2092,7 @@ def main():
                 "num_params": [num_params],
                 "num_non_embedding_params": [num_non_embedding_params],
                 "num_heads": [num_heads],
+                "lr_mult": [args.lr_mult],
                 "linear_value": [linear_value],
                 "seed": [seed],
                 "run_num": [run_num+1],
