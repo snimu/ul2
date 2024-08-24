@@ -19,10 +19,19 @@ python main.py -c --logfile results_eight9.csv -w --wandb_project ul2.eight --ev
 python main.py -c --logfile results_eight10.csv -w --wandb_project ul2.eight --eval_every 50 --model_scale 5.0 --seed 1600 --gpu_capacity_scalar 1.9 --num_runs 1 --max_epochs 1 --dataset fineweb --save_net --num_heads 6 --lr_mult 0.9 --ul2 --causal_divider 1000.0 --s_divider 1000.0 --r_divider 1.0 --x_divider 1000.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --no_special_tokens 
 
 # TODO
-python main.py -c --logfile results_eight11.csv -w --wandb_project ul2.eight --eval_every 50 --model_scale 20.0 --seed 1600 --gpu_capacity_scalar 1.9 --num_runs 1 --max_epochs 1 --dataset fineweb --save_net --num_heads 6 --lr_mult 0.9
-python main.py -c --logfile results_eight12.csv -w --wandb_project ul2.eight --eval_every 50 --model_scale 20.0 --seed 1600 --gpu_capacity_scalar 1.9 --num_runs 1 --max_epochs 1 --dataset fineweb --save_net --num_heads 6 --lr_mult 0.9 --ul2 --causal_divider 1000.0 --s_divider 1000.0 --r_divider 1.0 --x_divider 1000.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --no_special_tokens
+python main.py -c --logfile results_eight11.csv -w --wandb_project ul2.eight --eval_every 50 --model_scale 20.0 --seed 1600 --gpu_capacity_scalar 1.9 --num_runs 1 --max_epochs 1 --dataset fineweb --save_net --num_heads 26 --lr_mult 0.9
+python main.py -c --logfile results_eight12.csv -w --wandb_project ul2.eight --eval_every 50 --model_scale 20.0 --seed 1600 --gpu_capacity_scalar 1.9 --num_runs 1 --max_epochs 1 --dataset fineweb --save_net --num_heads 26 --lr_mult 0.9 --ul2 --causal_divider 1000.0 --s_divider 1000.0 --r_divider 1.0 --x_divider 1000.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --no_special_tokens
 
 # DONE (multihead - scale 1.0)
 python main.py -c --logfile results_eight13.csv -w --wandb_project ul2.eight --eval_every 50 --model_scale 1.0 --seed 1600 --gpu_capacity_scalar 1.9 --num_runs 1 --max_epochs 1 --dataset fineweb --save_net --num_heads 6
 python main.py -c --logfile results_eight14.csv -w --wandb_project ul2.eight --eval_every 50 --model_scale 1.0 --seed 1600 --gpu_capacity_scalar 1.9 --num_runs 1 --max_epochs 1 --dataset fineweb --save_net --num_heads 6 --ul2 --causal_divider 1000.0 --s_divider 1000.0 --r_divider 1.0 --x_divider 1.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --no_special_tokens
 python main.py -c --logfile results_eight15.csv -w --wandb_project ul2.eight --eval_every 50 --model_scale 1.0 --seed 1600 --gpu_capacity_scalar 1.9 --num_runs 1 --max_epochs 1 --dataset fineweb --save_net --num_heads 6 --ul2 --causal_divider 1000.0 --s_divider 1000.0 --r_divider 1.0 --x_divider 1000.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --no_special_tokens
+
+# TODO
+python main.py -c --logfile results_eight16.csv -w --wandb_project ul2.eight --eval_every 50 --model_scale 40.0 --seed 1600 --gpu_capacity_scalar 1.9 --num_runs 1 --max_epochs 1 --dataset fineweb --save_net --num_heads 32 --lr_mult 0.9
+python main.py -c --logfile results_eight17.csv -w --wandb_project ul2.eight --eval_every 50 --model_scale 40.0 --seed 1600 --gpu_capacity_scalar 1.9 --num_runs 1 --max_epochs 1 --dataset fineweb --save_net --num_heads 32
+python main.py -c --logfile results_eight18.csv -w --wandb_project ul2.eight --eval_every 50 --model_scale 40.0 --seed 1600 --gpu_capacity_scalar 1.9 --num_runs 1 --max_epochs 1 --dataset fineweb --save_net --num_heads 32 --lr_mult 0.9 --ul2 --causal_divider 1000.0 --s_divider 1000.0 --r_divider 1.0 --x_divider 1000.0  --causal_denoisers --alternate_denoisers --randomize_denoiser_settings --randomize_mask_width --no_special_tokens 
+
+# TODO (multihead but with no lr_mult, at scale 5.0 and 20.0)
+python main.py -c --logfile results_eight19.csv -w --wandb_project ul2.eight --eval_every 50 --model_scale 5.0 --seed 1600 --gpu_capacity_scalar 1.9 --num_runs 1 --max_epochs 1 --dataset fineweb --save_net --num_heads 16
+python main.py -c --logfile results_eight20.csv -w --wandb_project ul2.eight --eval_every 50 --model_scale 20.0 --seed 1600 --gpu_capacity_scalar 1.9 --num_runs 1 --max_epochs 1 --dataset fineweb --save_net --num_heads 26
