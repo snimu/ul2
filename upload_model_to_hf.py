@@ -11,7 +11,7 @@ def upload_model(storage_name, upload_name):
     login()
 
     # Prepare the repository name
-    repo_id = f"snimu/{upload_name}"
+    repo_id = f"snimu/causal-ul2-{upload_name}"
 
     # Get the directory and original filename
     dir_path = os.path.dirname(storage_name)
