@@ -7,3 +7,4 @@ polars
 pandas
 wandb
 safetensors
+huggingface_hub
