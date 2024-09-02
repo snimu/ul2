@@ -210,9 +210,9 @@ class MockNet(torch.nn.Module):
 def _check_autoregress_with_branching():
     print("Testing autoregress_with_branching")
     
-    net = MockNet(10, 10)
-    inputs = torch.randint(0, 10, (2, 5))
-    targets = torch.randint(0, 10, (2, 11))
+    net = MockNet(10, 10).to(DEVICE)
+    inputs = torch.randint(0, 10, (2, 5), device=DEVICE)
+    targets = torch.randint(0, 10, (2, 11), device=DEVICE)
     num_steps = 5
     results = autoregress_with_branching(net, inputs, targets, 3, 1, num_steps)
     print(results)
@@ -224,7 +224,7 @@ def _check_eval_autoregress_with_branching():
     print("Testing eval_autoregress_with_branching")
     
     ntok = main.hyp['misc']['num_tokens'] + main.hyp['misc']['num_special_tokens']
-    net = MockNet(ntok, ntok)
+    net = MockNet(ntok, ntok).to(DEVICE)
     args = get_args()
     results = eval_autoregress_with_branching_wikitext(net, args)
     print(results)
