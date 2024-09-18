@@ -1,4 +1,5 @@
 
+import argparse
 from typing import Any, Literal
 from pathlib import Path
 import gzip
@@ -238,12 +239,29 @@ def calc_ratio_compression(completion: str, full: str) -> tuple[float, float]:
     return compressed_completion_size / completion_size, compressed_full_size / full_size
 
 
+def get_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--model_size",
+        type=int, default=773, choices=[773, 240],
+        help="The model size to use. TYPE: int; DEFAULT: 773"
+    )
+
+    return parser.parse_args()
+
+
 def main():
+    """Test if the model weights are correctly loaded"""
     from rich import print
 
-    """Test if the model weights are correctly loaded"""
-    model_name_c = "snimu/causal-ul2-C-fineweb10BT-773M-26heads-lr090"
-    model_name_r = "snimu/causal-ul2-R-fineweb10BT-773M-26heads-lr090"
+    args = get_args()
+    if args.model_size == 773:
+        model_name_c = "snimu/causal-ul2-C-fineweb10BT-773M-26heads-lr090"
+        model_name_r = "snimu/causal-ul2-R-fineweb10BT-773M-26heads-lr090"
+    else:
+        model_name_c = "snimu/causal-ul2-C-fineweb10BT-240M-16heads-lr090"
+        model_name_r = "snimu/causal-ul2-R-fineweb10BT-240M-16heads-lr090"
 
     net_rand = make_net_from_name(model_name_c).to("cpu")
     net_c = make_net_from_name(model_name_c).to("cpu")
