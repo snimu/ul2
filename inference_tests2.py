@@ -244,7 +244,7 @@ def get_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--model_size",
-        type=int, default=773, choices=[773, 240],
+        type=int, default=773, choices=[1300, 773, 240],
         help="The model size to use. TYPE: int; DEFAULT: 773"
     )
 
@@ -259,9 +259,12 @@ def main():
     if args.model_size == 773:
         model_name_c = "snimu/causal-ul2-C-fineweb10BT-773M-26heads-lr090"
         model_name_r = "snimu/causal-ul2-R-fineweb10BT-773M-26heads-lr090"
-    else:
+    elif args.model_size == 240:
         model_name_c = "snimu/causal-ul2-C-fineweb10BT-240M-16heads-lr090"
         model_name_r = "snimu/causal-ul2-R-fineweb10BT-240M-16heads-lr090"
+    elif args.model_size == 1300:
+        model_name_c = "snimu/causal-ul2-C-wikitext-1300M-1head-lr100"
+        model_name_r = "snimu/causal-ul2-RX-wikitext-1300M-1head-lr100"
 
     net_rand = make_net_from_name(model_name_c).to("cpu")
     net_c = make_net_from_name(model_name_c).to("cpu")
