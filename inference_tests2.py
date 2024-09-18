@@ -310,11 +310,11 @@ def main():
 
         print(
             f"\n\n{sentence=}\n\n"
-            f"{completion_c1=}\n{size_ratio_completion_c1=}\n{size_ratio_full_c1=}\n{num_unique_words_c1=}\n{num_unique_tokens_c1=}\n"
+            f"{completion_c1=}\n{size_ratio_completion_c1=}\n{size_ratio_full_c1=}\n{num_unique_words_c1=}\n{num_unique_tokens_c1=}\n\n"
             f"{completion_r1=}\n{size_ratio_completion_r1=}\n{size_ratio_full_r1=}\n{num_unique_words_r1=}\n{num_unique_tokens_r1=}\n\n"
-            f"{completion_c2=}\n{size_ratio_completion_c2=}\n{size_ratio_full_c2=}\n{num_unique_words_c2=}\n{num_unique_tokens_c2=}\n"
+            f"{completion_c2=}\n{size_ratio_completion_c2=}\n{size_ratio_full_c2=}\n{num_unique_words_c2=}\n{num_unique_tokens_c2=}\n\n"
             f"{completion_r2=}\n{size_ratio_completion_r2=}\n{size_ratio_full_r2=}\n{num_unique_words_r2=}\n{num_unique_tokens_r2=}\n\n"
-            f"{completion_c3=}\n{size_ratio_completion_c3=}\n{size_ratio_full_c3=}\n{num_unique_words_c3=}\n{num_unique_tokens_c3=}\n"
+            f"{completion_c3=}\n{size_ratio_completion_c3=}\n{size_ratio_full_c3=}\n{num_unique_words_c3=}\n{num_unique_tokens_c3=}\n\n"
             f"{completion_r3=}\n{size_ratio_completion_r3=}\n{size_ratio_full_r3=}\n{num_unique_words_r3=}\n{num_unique_tokens_r3=}\n\n"
         ) 
         results.extend(
