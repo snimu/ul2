@@ -371,9 +371,8 @@ def test_split_sentences(
         completion_lengths = list(range(min_completion_len, max_completion_len+1, step_between_completion_lengths))
         for i, completion_length in enumerate(completion_lengths):
             loop.set_description(f"Splitting sentence {i+1}/{len(completion_lengths)}")
-            partial_input_ids = input_ids[:-completion_length]
-            partial_sentence = encoder.decode(partial_input_ids)
-            partial_input_ids = torch.tensor(partial_input_ids).to("cuda")
+            partial_sentence = encoder.decode(input_ids[:-completion_length])
+            target_ids = torch.tensor(input_ids[-completion_length:]).to("cuda")
             completion_c1, _, logprobs_c1 = generate(net_c, encoder, partial_sentence, max_gen_tokens=completion_length)
             completion_c2, _, logprobs_c2 = generate(net_c, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=2)
             completion_c3, _, logprobs_c3 = generate(net_c, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=3)
@@ -385,29 +384,29 @@ def test_split_sentences(
                 dict(
                     partial_sentence=partial_sentence,
                     completion_c1=completion_c1,
-                    edit_distance_c1=Levenshtein.distance(partial_input_ids.tolist(), encoder.encode_ordinary(completion_c1)),
-                    acc_c1=(torch.tensor(encoder.encode_ordinary(completion_c1)) == partial_input_ids).float().mean().item(),
-                    ce_loss_c1=ce_loss(logprobs_c1.flatten(0, 1), partial_input_ids.flatten(0, 1)).item(),
+                    edit_distance_c1=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_c1)),
+                    acc_c1=(torch.tensor(encoder.encode_ordinary(completion_c1)) == target_ids).float().mean().item(),
+                    ce_loss_c1=ce_loss(logprobs_c1.flatten(0, 1), target_ids.flatten(0, 1)).item(),
                     completion_c2=completion_c2,
-                    edit_distance_c2=Levenshtein.distance(partial_input_ids.tolist(), encoder.encode_ordinary(completion_c2)),
-                    acc_c2=(torch.tensor(encoder.encode_ordinary(completion_c2)) == partial_input_ids).float().mean().item(),
-                    ce_loss_c2=ce_loss(logprobs_c2.flatten(0, 1), partial_input_ids.flatten(0, 1)).item(),
+                    edit_distance_c2=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_c2)),
+                    acc_c2=(torch.tensor(encoder.encode_ordinary(completion_c2)) == target_ids).float().mean().item(),
+                    ce_loss_c2=ce_loss(logprobs_c2.flatten(0, 1), target_ids.flatten(0, 1)).item(),
                     completion_c3=completion_c3,
-                    edit_distance_c3=Levenshtein.distance(partial_input_ids.tolist(), encoder.encode_ordinary(completion_c3)),
-                    acc_c3=(torch.tensor(encoder.encode_ordinary(completion_c3)) == partial_input_ids).float().mean().item(),
-                    ce_loss_c3=ce_loss(logprobs_c3.flatten(0, 1), partial_input_ids.flatten(0, 1)).item(),
+                    edit_distance_c3=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_c3)),
+                    acc_c3=(torch.tensor(encoder.encode_ordinary(completion_c3)) == target_ids).float().mean().item(),
+                    ce_loss_c3=ce_loss(logprobs_c3.flatten(0, 1), target_ids.flatten(0, 1)).item(),
                     completion_r1=completion_r1,
-                    edit_distance_r1=Levenshtein.distance(partial_input_ids.tolist(), encoder.encode_ordinary(completion_r1)),
-                    acc_r1=(torch.tensor(encoder.encode_ordinary(completion_r1)) == partial_input_ids).float().mean().item(),
-                    ce_loss_r1=ce_loss(logprobs_r1.flatten(0, 1), partial_input_ids.flatten(0, 1)).item(),
+                    edit_distance_r1=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_r1)),
+                    acc_r1=(torch.tensor(encoder.encode_ordinary(completion_r1)) == target_ids).float().mean().item(),
+                    ce_loss_r1=ce_loss(logprobs_r1.flatten(0, 1), target_ids.flatten(0, 1)).item(),
                     completion_r2=completion_r2,
-                    edit_distance_r2=Levenshtein.distance(partial_input_ids.tolist(), encoder.encode_ordinary(completion_r2)),
-                    acc_r2=(torch.tensor(encoder.encode_ordinary(completion_r2)) == partial_input_ids).float().mean().item(),
-                    ce_loss_r2=ce_loss(logprobs_r2.flatten(0, 1), partial_input_ids.flatten(0, 1)).item(),
+                    edit_distance_r2=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_r2)),
+                    acc_r2=(torch.tensor(encoder.encode_ordinary(completion_r2)) == target_ids).float().mean().item(),
+                    ce_loss_r2=ce_loss(logprobs_r2.flatten(0, 1), target_ids.flatten(0, 1)).item(),
                     completion_r3=completion_r3,
-                    edit_distance_r3=Levenshtein.distance(partial_input_ids.tolist(), encoder.encode_ordinary(completion_r3)),
-                    acc_r3=(torch.tensor(encoder.encode_ordinary(completion_r3)) == partial_input_ids).float().mean().item(),
-                    ce_loss_r3=ce_loss(logprobs_r3.flatten(0, 1), partial_input_ids.flatten(0, 1)).item(),
+                    edit_distance_r3=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_r3)),
+                    acc_r3=(torch.tensor(encoder.encode_ordinary(completion_r3)) == target_ids).float().mean().item(),
+                    ce_loss_r3=ce_loss(logprobs_r3.flatten(0, 1), target_ids.flatten(0, 1)).item(),
                     l2_loss_c1_c2=l2_loss(logprobs_c1, logprobs_c2).item(),
                     l2_loss_c1_c3=l2_loss(logprobs_c1, logprobs_c3).item(),
                     l2_loss_c2_c3=l2_loss(logprobs_c2, logprobs_c3).item(),
