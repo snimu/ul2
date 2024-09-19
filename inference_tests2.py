@@ -184,7 +184,7 @@ def generate(
     # Generate the output tokens
     output_str = []
     all_ids = input_ids
-    for _ in range(max_gen_tokens):
+    while len(encoder.encode_ordinary("".join(output_str))) < max_gen_tokens:
         logits: torch.Tensor = net(all_ids)
         output_id = logits[:, -1, :50304].topk(choose_nth_best, dim=-1).indices[:, -1].item()  # ignore last token position, only decode valid token indices ( up to50304)
         char = encoder.decode([output_id])
