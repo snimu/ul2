@@ -502,6 +502,16 @@ def get_args() -> argparse.Namespace:
         type=str, default=None,
         help="The file to save the results to. TYPE: str; DEFAULT: None"
     )
+    parser.add_argument(
+        "--no_test_split_sentences",
+        action="store_false",
+        help="Do not test the split_sentences function. TYPE: bool; DEFAULT: True"
+    )
+    parser.add_argument(
+        "--no_test_free_completion",
+        action="store_false",
+        help="Do not test the free_completion function. TYPE: bool; DEFAULT: True"
+    )
 
     return parser.parse_args()
 
@@ -569,17 +579,22 @@ def main():
     net_r = net_r.to("cuda")
 
     encoder = tiktoken.get_encoding("gpt2")
-    results_free_completion = test_free_completion(net_c, net_r, encoder, sentences, verbosity=args.verbosity)
-    results_split_sentences = test_split_sentences(net_c, net_r, encoder, sentences, verbosity=args.verbosity)
-    
-    if args.verbosity > 0:
-        print(results_free_completion.get("summary"))
-        print(results_split_sentences.get("summary"))
-
-    if args.savefile:
-        with open(args.savefile, "w") as f:
-            json.dump(results_free_completion, f, indent=2)
-            json.dump(results_split_sentences, f, indent=2)
+    if not args.no_test_free_completion:
+        print("Testing free completion")
+        results_free_completion = test_free_completion(net_c, net_r, encoder, sentences, verbosity=args.verbosity)
+        if args.verbosity > 0:
+            print(results_free_completion.get("summary"))
+        if args.savefile:
+            with open(args.savefile, "w") as f:
+                json.dump(results_free_completion, f, indent=2)
+    if not args.no_test_split_sentences:
+        print("Testing split sentences")
+        results_split_sentences = test_split_sentences(net_c, net_r, encoder, sentences, verbosity=args.verbosity)
+        if args.verbosity > 0:
+            print(results_split_sentences.get("summary"))
+        if args.savefile:
+            with open(args.savefile, "w") as f:
+                json.dump(results_split_sentences, f, indent=2)
 
 
 if __name__ == "__main__":
