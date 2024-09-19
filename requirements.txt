@@ -8,3 +8,4 @@ pandas
 wandb
 safetensors
 huggingface_hub
+levenshtein
