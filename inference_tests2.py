@@ -188,8 +188,6 @@ def generate(
         logits: torch.Tensor = net(all_ids)
         output_id = logits[:, -1, :50304].topk(choose_nth_best, dim=-1).indices[:, -1].item()  # ignore last token position, only decode valid token indices ( up to50304)
         char = encoder.decode([output_id])
-        if len(output_str) + 1 >= max_gen_tokens:
-            break
         output_str.append(char)
         all_ids = torch.cat([all_ids, torch.tensor([output_id], device="cuda", dtype=torch.int).unsqueeze(0)], dim=1)
         if until and char in until:
@@ -243,6 +241,31 @@ def calc_ratio_compression(completion: str, full: str) -> tuple[float, float]:
     compressed_completion_size = len(gzip.compress(completion.encode()))
     compressed_full_size = len(gzip.compress(full.encode()))
     return compressed_completion_size / completion_size, compressed_full_size / full_size
+
+
+def calc_acc(completion: str, target_ids: torch.Tensor, encoding: tiktoken.Encoding) -> float:
+    completion_ids = encoding.encode_ordinary(completion)
+    if len(completion_ids) > len(target_ids):
+        completion_ids = completion_ids[:len(target_ids)]
+    if len(target_ids) > len(completion_ids):
+        target_ids = target_ids[:len(completion_ids)]
+    return (torch.tensor(completion_ids, device="cuda") == target_ids).float().mean().item()
+
+
+def calc_ce_loss(logprobs: torch.Tensor, target_ids: torch.Tensor) -> float:
+    if len(logprobs) > len(target_ids):
+        logprobs = logprobs[:len(target_ids)]
+    if len(target_ids) > len(logprobs):
+        target_ids = target_ids[:len(logprobs)]
+    return F.cross_entropy(logprobs, target_ids).item()
+
+
+def calc_l2_loss(logprobs_c1: torch.Tensor, logprobs_c2: torch.Tensor) -> float:
+    if len(logprobs_c1) > len(logprobs_c2):
+        logprobs_c1 = logprobs_c1[:len(logprobs_c2)]
+    if len(logprobs_c2) > len(logprobs_c1):
+        logprobs_c2 = logprobs_c2[:len(logprobs_c1)]
+    return F.mse_loss(logprobs_c1, logprobs_c2).item()
 
 
 def test_free_completion(
@@ -387,37 +410,37 @@ def test_split_sentences(
                     partial_sentence=partial_sentence,
                     completion_c1=completion_c1,
                     edit_distance_c1=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_c1)),
-                    acc_c1=(torch.tensor(encoder.encode_ordinary(completion_c1), device="cuda") == target_ids).float().mean().item(),
-                    ce_loss_c1=ce_loss(logprobs_c1, target_ids).item(),
+                    acc_c1=calc_acc(completion_c1, target_ids, encoder),
+                    ce_loss_c1=calc_ce_loss(logprobs_c1, target_ids),
                     completion_c2=completion_c2,
                     edit_distance_c2=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_c2)),
-                    acc_c2=(torch.tensor(encoder.encode_ordinary(completion_c2), device="cuda") == target_ids).float().mean().item(),
-                    ce_loss_c2=ce_loss(logprobs_c2, target_ids).item(),
+                    acc_c2=calc_acc(completion_c2, target_ids, encoder),
+                    ce_loss_c2=calc_ce_loss(logprobs_c2, target_ids),
                     completion_c3=completion_c3,
                     edit_distance_c3=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_c3)),
-                    acc_c3=(torch.tensor(encoder.encode_ordinary(completion_c3), device="cuda") == target_ids).float().mean().item(),
-                    ce_loss_c3=ce_loss(logprobs_c3, target_ids).item(),
+                    acc_c3=calc_acc(completion_c3, target_ids, encoder),
+                    ce_loss_c3=calc_ce_loss(logprobs_c3, target_ids),
                     completion_r1=completion_r1,
                     edit_distance_r1=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_r1)),
-                    acc_r1=(torch.tensor(encoder.encode_ordinary(completion_r1), device="cuda") == target_ids).float().mean().item(),
-                    ce_loss_r1=ce_loss(logprobs_r1, target_ids).item(),
+                    acc_r1=calc_acc(completion_r1, target_ids, encoder),
+                    ce_loss_r1=calc_ce_loss(logprobs_r1, target_ids),
                     completion_r2=completion_r2,
                     edit_distance_r2=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_r2)),
-                    acc_r2=(torch.tensor(encoder.encode_ordinary(completion_r2), device="cuda") == target_ids).float().mean().item(),
-                    ce_loss_r2=ce_loss(logprobs_r2, target_ids).item(),
+                    acc_r2=calc_acc(completion_r2, target_ids, encoder),
+                    ce_loss_r2=calc_ce_loss(logprobs_r2, target_ids),
                     completion_r3=completion_r3,
                     edit_distance_r3=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_r3)),
-                    acc_r3=(torch.tensor(encoder.encode_ordinary(completion_r3), device="cuda") == target_ids).float().mean().item(),
-                    ce_loss_r3=ce_loss(logprobs_r3, target_ids).item(),
-                    l2_loss_c1_c2=l2_loss(logprobs_c1, logprobs_c2).item(),
-                    l2_loss_c1_c3=l2_loss(logprobs_c1, logprobs_c3).item(),
-                    l2_loss_c2_c3=l2_loss(logprobs_c2, logprobs_c3).item(),
-                    l2_loss_r1_r2=l2_loss(logprobs_r1, logprobs_r2).item(),
-                    l2_loss_r1_r3=l2_loss(logprobs_r1, logprobs_r3).item(),
-                    l2_loss_r2_r3=l2_loss(logprobs_r2, logprobs_r3).item(),
-                    l2_loss_c1_r1=l2_loss(logprobs_c1, logprobs_r1).item(),
-                    l2_loss_c2_r2=l2_loss(logprobs_c2, logprobs_r2).item(),
-                    l2_loss_c3_r3=l2_loss(logprobs_c3, logprobs_r3).item(),
+                    acc_r3=calc_acc(completion_r3, target_ids, encoder),
+                    ce_loss_r3=calc_ce_loss(logprobs_r3, target_ids),
+                    l2_loss_c1_c2=calc_l2_loss(logprobs_c1, logprobs_c2),
+                    l2_loss_c1_c3=calc_l2_loss(logprobs_c1, logprobs_c3),
+                    l2_loss_c2_c3=calc_l2_loss(logprobs_c2, logprobs_c3),
+                    l2_loss_r1_r2=calc_l2_loss(logprobs_r1, logprobs_r2),
+                    l2_loss_r1_r3=calc_l2_loss(logprobs_r1, logprobs_r3),
+                    l2_loss_r2_r3=calc_l2_loss(logprobs_r2, logprobs_r3),
+                    l2_loss_c1_r1=calc_l2_loss(logprobs_c1, logprobs_r1),
+                    l2_loss_c2_r2=calc_l2_loss(logprobs_c2, logprobs_r2),
+                    l2_loss_c3_r3=calc_l2_loss(logprobs_c3, logprobs_r3),
                 )
             )
 
