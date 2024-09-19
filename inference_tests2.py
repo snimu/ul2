@@ -4,6 +4,7 @@ from typing import Any, Literal
 from pathlib import Path
 import gzip
 import json
+from tqdm import tqdm
 
 import torch
 import safetensors.torch
@@ -242,9 +243,11 @@ def calc_ratio_compression(completion: str, full: str) -> tuple[float, float]:
     return compressed_completion_size / completion_size, compressed_full_size / full_size
 
 
-def test_free_completion(net_c, net_r, encoder, sentences, verbose: bool = True) -> dict[str, Any]:
+def test_free_completion(
+        net_c, net_r, encoder, sentences, verbosity: int = 1
+) -> dict[str, Any]:
     results = dict()
-    for sentence in sentences:
+    for sentence in tqdm(sentences, disable=not verbosity):
         completion_c1, _, _ = generate(net_c, encoder, sentence, max_gen_tokens=50)
         size_ratio_completion_c1, size_ratio_full_c1 = calc_ratio_compression(completion_c1, sentence+completion_c1)
         num_unique_words_c1 = len(set(completion_c1.split()))
@@ -308,7 +311,7 @@ def test_free_completion(net_c, net_r, encoder, sentences, verbose: bool = True)
             "num_unique_tokens_r3": num_unique_tokens_r3,
         }
 
-        if verbose:
+        if verbosity > 1:
             print(
                 f"\n\n{sentence=}\n\n"
                 f"{results[sentence]=}\n\n"
@@ -349,14 +352,15 @@ def test_split_sentences(
         net_r: SpeedyLangNet, 
         encoder: tiktoken.Encoding, 
         sentences: list[str], 
-        verbose: bool = True, 
+        verbosity: int = 1, 
         min_completion_len: int = 10,
         step_between_completion_lengths: int = 10,
 ) -> dict[str, dict[str, Any | list[dict[str, Any]]]]: 
     results = dict()
     ce_loss  = nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
     l2_loss  = nn.MSELoss(reduction='mean')
-    for sentence in sentences:
+    loop = tqdm(sentences, disable=not verbosity)
+    for sentence in loop:
         results[sentence] = dict(details=[])
         input_ids = encoder.encode_ordinary(sentence)
         max_completion_len = len(input_ids) // 2
@@ -365,7 +369,8 @@ def test_split_sentences(
             max_completion_len - (max_completion_len % step_between_completion_lengths)
         )
         completion_lengths = list(range(min_completion_len, max_completion_len+1, step_between_completion_lengths))
-        for completion_length in completion_lengths:
+        for i, completion_length in enumerate(completion_lengths):
+            loop.set_description(f"Splitting sentence {i+1}/{len(completion_lengths)}")
             partial_input_ids = input_ids[:-completion_length]
             partial_sentence = encoder.decode(partial_input_ids)
             partial_input_ids = torch.tensor(partial_input_ids).to("cuda")
@@ -412,7 +417,7 @@ def test_split_sentences(
                 )
             )
 
-            if verbose:
+            if verbosity > 1:
                 print(results[sentence]["details"][-1])
         
         results[sentence]["mean_acc_c1"] = sum([d["acc_c1"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
@@ -555,8 +560,8 @@ def main():
     net_r = net_r.to("cuda")
 
     encoder = tiktoken.get_encoding("gpt2")
-    results_free_completion = test_free_completion(net_c, net_r, encoder, sentences, verbose=args.verbosity > 1)
-    results_split_sentences = test_split_sentences(net_c, net_r, encoder, sentences, verbose=args.verbosity > 1)
+    results_free_completion = test_free_completion(net_c, net_r, encoder, sentences, verbosity=args.verbosity > 1)
+    results_split_sentences = test_split_sentences(net_c, net_r, encoder, sentences, verbosity=args.verbosity > 1)
     
     if args.verbosity > 0:
         print(results_free_completion.get("summary"))
