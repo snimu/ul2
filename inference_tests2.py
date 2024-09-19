@@ -579,7 +579,7 @@ def main():
     net_r = net_r.to("cuda")
 
     encoder = tiktoken.get_encoding("gpt2")
-    if not args.no_test_free_completion:
+    if args.no_test_free_completion:
         print("Testing free completion")
         results_free_completion = test_free_completion(net_c, net_r, encoder, sentences, verbosity=args.verbosity)
         if args.verbosity > 0:
@@ -587,7 +587,7 @@ def main():
         if args.savefile:
             with open(args.savefile, "w") as f:
                 json.dump(results_free_completion, f, indent=2)
-    if not args.no_test_split_sentences:
+    if args.no_test_split_sentences:
         print("Testing split sentences")
         results_split_sentences = test_split_sentences(net_c, net_r, encoder, sentences, verbosity=args.verbosity)
         if args.verbosity > 0:
