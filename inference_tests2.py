@@ -414,6 +414,9 @@ def test_split_sentences(
                     l2_loss_r1_r2=l2_loss(logprobs_r1, logprobs_r2).item(),
                     l2_loss_r1_r3=l2_loss(logprobs_r1, logprobs_r3).item(),
                     l2_loss_r2_r3=l2_loss(logprobs_r2, logprobs_r3).item(),
+                    l2_loss_c1_r1=l2_loss(logprobs_c1, logprobs_r1).item(),
+                    l2_loss_c2_r2=l2_loss(logprobs_c2, logprobs_r2).item(),
+                    l2_loss_c3_r3=l2_loss(logprobs_c3, logprobs_r3).item(),
                 )
             )
 
@@ -444,6 +447,9 @@ def test_split_sentences(
         results[sentence]["mean_l2_loss_r1_r2"] = sum([d["l2_loss_r1_r2"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
         results[sentence]["mean_l2_loss_r1_r3"] = sum([d["l2_loss_r1_r3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
         results[sentence]["mean_l2_loss_r2_r3"] = sum([d["l2_loss_r2_r3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
+        results[sentence]["mean_l2_loss_c1_r1"] = sum([d["l2_loss_c1_r1"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
+        results[sentence]["mean_l2_loss_c2_r2"] = sum([d["l2_loss_c2_r2"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
+        results[sentence]["mean_l2_loss_c3_r3"] = sum([d["l2_loss_c3_r3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
     
     summary = {
         "mean_acc_c1": torch.tensor([results[sentence]["mean_acc_c1"] for sentence in results]).mean().item(),
@@ -470,6 +476,9 @@ def test_split_sentences(
         "mean_l2_loss_r1_r2": torch.tensor([results[sentence]["mean_l2_loss_r1_r2"] for sentence in results]).mean().item(),
         "mean_l2_loss_r1_r3": torch.tensor([results[sentence]["mean_l2_loss_r1_r3"] for sentence in results]).mean().item(),
         "mean_l2_loss_r2_r3": torch.tensor([results[sentence]["mean_l2_loss_r2_r3"] for sentence in results]).mean().item(),
+        "mean_l2_loss_c1_r1": torch.tensor([results[sentence]["mean_l2_loss_c1_r1"] for sentence in results]).mean().item(),
+        "mean_l2_loss_c2_r2": torch.tensor([results[sentence]["mean_l2_loss_c2_r2"] for sentence in results]).mean().item(),
+        "mean_l2_loss_c3_r3": torch.tensor([results[sentence]["mean_l2_loss_c3_r3"] for sentence in results]).mean().item(),
     }
     results["summary"] = summary
     return results
@@ -560,8 +569,8 @@ def main():
     net_r = net_r.to("cuda")
 
     encoder = tiktoken.get_encoding("gpt2")
-    results_free_completion = test_free_completion(net_c, net_r, encoder, sentences, verbosity=args.verbosity > 1)
-    results_split_sentences = test_split_sentences(net_c, net_r, encoder, sentences, verbosity=args.verbosity > 1)
+    results_free_completion = test_free_completion(net_c, net_r, encoder, sentences, verbosity=args.verbosity)
+    results_split_sentences = test_split_sentences(net_c, net_r, encoder, sentences, verbosity=args.verbosity)
     
     if args.verbosity > 0:
         print(results_free_completion.get("summary"))
