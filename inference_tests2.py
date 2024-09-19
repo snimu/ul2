@@ -188,6 +188,8 @@ def generate(
         logits: torch.Tensor = net(all_ids)
         output_id = logits[:, -1, :50304].topk(choose_nth_best, dim=-1).indices[:, -1].item()  # ignore last token position, only decode valid token indices ( up to50304)
         char = encoder.decode([output_id])
+        if len(output_str) + 1 >= max_gen_tokens:
+            break
         output_str.append(char)
         all_ids = torch.cat([all_ids, torch.tensor([output_id], device="cuda", dtype=torch.int).unsqueeze(0)], dim=1)
         if until and char in until:
