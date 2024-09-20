@@ -367,15 +367,6 @@ def test_split_sentences(
 
             if verbosity > 1:
                 print(results[sentence]["details"][-1])
-        
-        for choose_nth_best in range(1, max_choose_nth_best+1):
-            results[sentence][f"mean_acc_c{choose_nth_best}"] = sum([d[f"acc_c{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-            results[sentence][f"mean_ce_loss_c{choose_nth_best}"] = sum([d[f"ce_loss_c{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-            results[sentence][f"mean_edit_distance_c{choose_nth_best}"] = sum([d[f"edit_distance_c{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-            results[sentence][f"mean_acc_r{choose_nth_best}"] = sum([d[f"acc_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-            results[sentence][f"mean_ce_loss_r{choose_nth_best}"] = sum([d[f"ce_loss_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-            results[sentence][f"mean_edit_distance_r{choose_nth_best}"] = sum([d[f"edit_distance_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-            results[sentence][f"mean_l2_loss_{choose_nth_best}"] = sum([d[f"l2_loss_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
 
     summary = dict()
     for choose_nth_best in range(1, max_choose_nth_best+1):
