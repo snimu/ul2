@@ -184,10 +184,11 @@ def generate(
 ) -> tuple[str, torch.Tensor, torch.Tensor]:
     # Encode the input tokens
     input_ids = encoder.encode_ordinary(query)
+    input_ids = torch.tensor(input_ids, device="cuda", dtype=torch.int)
     if masking_rate > 0:
         mask_positions = torch.rand(len(input_ids)) < masking_rate
         input_ids[mask_positions] = mask
-    input_ids = torch.tensor(input_ids, device="cuda", dtype=torch.int).unsqueeze(0)
+    input_ids = input_ids.unsqueeze(0)
     input_len = input_ids.shape[1]
     
     # Generate the output tokens
