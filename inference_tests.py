@@ -1,6 +1,5 @@
 
 import os
-from dotenv import load_dotenv
 import argparse
 from typing import Any, Literal
 from pathlib import Path
@@ -8,6 +7,7 @@ import gzip
 import json
 from tqdm import tqdm
 
+from dotenv import load_dotenv
 import torch
 import safetensors.torch
 import torch.nn as nn
