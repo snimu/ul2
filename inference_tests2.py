@@ -355,10 +355,10 @@ def test_split_sentences(
                 completion_c, _, logprobs_c = generate(net_c, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=choose_nth_best)
                 completion_r, _, logprobs_r = generate(net_r, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=choose_nth_best)
 
-                details[f"completion_{choose_nth_best}"] = completion_c
-                details[f"edit_distance_{choose_nth_best}"] = Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_c))
-                details[f"acc_{choose_nth_best}"] = calc_acc(completion_c, target_ids, encoder)
-                details[f"ce_loss_{choose_nth_best}"] = calc_ce_loss(logprobs_c, target_ids)
+                details[f"completion_c{choose_nth_best}"] = completion_c
+                details[f"edit_distance_c{choose_nth_best}"] = Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_c))
+                details[f"acc_c{choose_nth_best}"] = calc_acc(completion_c, target_ids, encoder)
+                details[f"ce_loss_c{choose_nth_best}"] = calc_ce_loss(logprobs_c, target_ids)
                 details[f"completion_r{choose_nth_best}"] = completion_r
                 details[f"edit_distance_r{choose_nth_best}"] = Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_r))
                 details[f"acc_r{choose_nth_best}"] = calc_acc(completion_r, target_ids, encoder)
