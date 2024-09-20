@@ -351,7 +351,7 @@ def test_split_sentences(
         for i, completion_length in enumerate(completion_lengths):
             partial_sentence = encoder.decode(input_ids[:-completion_length])
             target_ids = torch.tensor(input_ids[-completion_length:]).to("cuda")
-            details = dict(partial_sentence=partial_sentence, target_ids=target_ids)
+            details = dict(partial_sentence=partial_sentence, target_ids=target_ids.tolist())
             for choose_nth_best in range(1, max_choose_nth_best+1):
                 loop.set_description(
                     f"{completion_length=}/{max_completion_len}, "
