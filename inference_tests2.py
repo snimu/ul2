@@ -308,14 +308,14 @@ def test_free_completion(
     for choose_nth_best in range(1, max_choose_nth_best+1):
         summary.update(
             {
-                f"mean_size_ratio_completion_c{choose_nth_best}": torch.tensor([results[sentence]["size_ratio_completion_c1"] for sentence in results]).float().mean().item(),
-                f"mean_size_ratio_full_c{choose_nth_best}": torch.tensor([results[sentence]["size_ratio_full_c1"] for sentence in results]).float().mean().item(),
-                f"mean_num_unique_words_c{choose_nth_best}": torch.tensor([results[sentence]["num_unique_words_c1"] for sentence in results]).float().mean().item(),
-                f"mean_num_unique_tokens_c{choose_nth_best}": torch.tensor([results[sentence]["num_unique_tokens_c1"] for sentence in results]).float().mean().item(),
-                f"mean_size_ratio_completion_r{choose_nth_best}": torch.tensor([results[sentence]["size_ratio_completion_r1"] for sentence in results]).float().mean().item(),
-                f"mean_size_ratio_full_r{choose_nth_best}": torch.tensor([results[sentence]["size_ratio_full_r1"] for sentence in results]).float().mean().item(),
-                f"mean_num_unique_words_r{choose_nth_best}": torch.tensor([results[sentence]["num_unique_words_r1"] for sentence in results]).float().mean().item(),
-                f"mean_num_unique_tokens_r{choose_nth_best}": torch.tensor([results[sentence]["num_unique_tokens_r1"] for sentence in results]).float().mean().item(),
+                f"mean_size_ratio_completion_c{choose_nth_best}": torch.tensor([results[sentence][f"size_ratio_completion_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
+                f"mean_size_ratio_full_c{choose_nth_best}": torch.tensor([results[sentence][f"size_ratio_full_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
+                f"mean_num_unique_words_c{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_words_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
+                f"mean_num_unique_tokens_c{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_tokens_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
+                f"mean_size_ratio_completion_r{choose_nth_best}": torch.tensor([results[sentence][f"size_ratio_completion_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
+                f"mean_size_ratio_full_r{choose_nth_best}": torch.tensor([results[sentence][f"size_ratio_full_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
+                f"mean_num_unique_words_r{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_words_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
+                f"mean_num_unique_tokens_r{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_tokens_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
             }
         )
     results["summary"] = summary
@@ -369,9 +369,9 @@ def test_split_sentences(
                 print(results[sentence]["details"][-1])
         
         for choose_nth_best in range(1, max_choose_nth_best+1):
-            results[sentence][f"mean_acc_c{choose_nth_best}"] = sum([d[f"acc_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-            results[sentence][f"mean_ce_loss_c{choose_nth_best}"] = sum([d[f"ce_loss_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-            results[sentence][f"mean_edit_distance_c{choose_nth_best}"] = sum([d[f"edit_distance_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
+            results[sentence][f"mean_acc_c{choose_nth_best}"] = sum([d[f"acc_c{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
+            results[sentence][f"mean_ce_loss_c{choose_nth_best}"] = sum([d[f"ce_loss_c{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
+            results[sentence][f"mean_edit_distance_c{choose_nth_best}"] = sum([d[f"edit_distance_c{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
             results[sentence][f"mean_acc_r{choose_nth_best}"] = sum([d[f"acc_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
             results[sentence][f"mean_ce_loss_r{choose_nth_best}"] = sum([d[f"ce_loss_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
             results[sentence][f"mean_edit_distance_r{choose_nth_best}"] = sum([d[f"edit_distance_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
@@ -382,8 +382,8 @@ def test_split_sentences(
         summary.update(
             {
                 f"mean_acc_c{choose_nth_best}": sum([d[f"acc_c{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
-                f"mean_ce_loss_c{choose_nth_best}": sum([d[f"ce_loss_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
-                f"mean_edit_distance_c{choose_nth_best}": sum([d[f"edit_distance_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
+                f"mean_ce_loss_c{choose_nth_best}": sum([d[f"ce_loss_c{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
+                f"mean_edit_distance_c{choose_nth_best}": sum([d[f"edit_distance_c{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
                 f"mean_acc_r{choose_nth_best}": sum([d[f"acc_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
                 f"mean_ce_loss_r{choose_nth_best}": sum([d[f"ce_loss_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
                 f"mean_edit_distance_r{choose_nth_best}": sum([d[f"edit_distance_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
