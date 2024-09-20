@@ -278,8 +278,8 @@ def test_free_completion(
 ) -> dict[str, Any]:
     results = dict()
     loop = tqdm(sentences, disable=not verbosity)
-    for sentence in tqdm(sentences, disable=not verbosity):
-        for choose_nth_best in loop:
+    for sentence in loop:
+        for choose_nth_best in range(1, max_choose_nth_best+1):
             loop.set_description(f"{choose_nth_best=}/{max_choose_nth_best}")
             completion_c, _, _ = generate(net_c, encoder, sentence, max_gen_tokens=50, choose_nth_best=choose_nth_best)
             size_ratio_completion_c, size_ratio_full_c = calc_ratio_compression(completion_c, sentence+completion_c)
