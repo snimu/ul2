@@ -584,7 +584,7 @@ def main():
             save_json(
                 data=results_free_completion, 
                 path=args.savefile,
-                postfix=f"free_completion__masking_rate_{round(args.masking_rate * 100)}"
+                postfix=f"free_completion__masking_rate_{round(args.masking_rate * 100)}_percent"
             )
     if args.no_test_split_sentences:
         print("Testing split sentences")
@@ -603,7 +603,7 @@ def main():
             save_json(
                 data=results_split_sentences, 
                 path=args.savefile,
-                postfix=f"split_sentences__masking_rate_{round(args.masking_rate * 100)}"
+                postfix=f"split_sentences__masking_rate_{round(args.masking_rate * 100)}_percent"
             )
 
 
