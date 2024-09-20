@@ -294,6 +294,7 @@ def test_free_completion(
             loop.set_description(f"{choose_nth_best=}/{max_choose_nth_best}")
             completion_c, _, _ = generate(
                 net=net_c,
+                encoder=encoder,
                 query=sentence,
                 max_gen_tokens=50,
                 choose_nth_best=choose_nth_best,
@@ -305,6 +306,7 @@ def test_free_completion(
 
             completion_r, _, _ = generate(
                 net=net_r,
+                encoder=encoder,
                 query=sentence,
                 max_gen_tokens=50,
                 choose_nth_best=choose_nth_best,
@@ -358,6 +360,7 @@ def test_split_sentences(
         min_completion_len: int = 10,
         step_between_completion_lengths: int = 10,
         max_choose_nth_best: int = 3,
+        masking_rate: float = 0.0,
 ) -> dict[str, dict[str, Any | list[dict[str, Any]]]]: 
     results = dict()
     loop = tqdm(sentences, disable=not verbosity)
@@ -379,8 +382,22 @@ def test_split_sentences(
                     f"{completion_length=}/{max_completion_len}, "
                     f"{choose_nth_best=}/{max_choose_nth_best}"
                 ) 
-                completion_c, _, logprobs_c = generate(net_c, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=choose_nth_best)
-                completion_r, _, logprobs_r = generate(net_r, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=choose_nth_best)
+                completion_c, _, logprobs_c = generate(
+                    net=net_c,
+                    encoder=encoder,
+                    query=partial_sentence,
+                    max_gen_tokens=completion_length,
+                    choose_nth_best=choose_nth_best,
+                    masking_rate=masking_rate,
+                )
+                completion_r, _, logprobs_r = generate(
+                    net=net_r,
+                    encoder=encoder,
+                    query=partial_sentence,
+                    max_gen_tokens=completion_length,
+                    choose_nth_best=choose_nth_best,
+                    masking_rate=masking_rate,
+                )
 
                 details[f"completion_c{choose_nth_best}"] = completion_c
                 details[f"edit_distance_c{choose_nth_best}"] = Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_c))
