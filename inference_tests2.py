@@ -279,6 +279,7 @@ def test_free_completion(
     results = dict()
     loop = tqdm(sentences, disable=not verbosity)
     for sentence in loop:
+        results[sentence] = dict()
         for choose_nth_best in range(1, max_choose_nth_best+1):
             loop.set_description(f"{choose_nth_best=}/{max_choose_nth_best}")
             completion_c, _, _ = generate(net_c, encoder, sentence, max_gen_tokens=50, choose_nth_best=choose_nth_best)
@@ -289,10 +290,10 @@ def test_free_completion(
             size_ratio_completion_r, size_ratio_full_r = calc_ratio_compression(completion_r, sentence+completion_r)
             num_unique_words_r = len(set(completion_r.split()))
 
-            results[sentence][f"completion_{choose_nth_best}"] = completion_c
-            results[sentence][f"size_ratio_completion_{choose_nth_best}"] = size_ratio_completion_c
-            results[sentence][f"size_ratio_full_{choose_nth_best}"] = size_ratio_full_c
-            results[sentence][f"num_unique_words_{choose_nth_best}"] = num_unique_words_c
+            results[sentence][f"completion_c{choose_nth_best}"] = completion_c
+            results[sentence][f"size_ratio_completion_c{choose_nth_best}"] = size_ratio_completion_c
+            results[sentence][f"size_ratio_full_c{choose_nth_best}"] = size_ratio_full_c
+            results[sentence][f"num_unique_words_c{choose_nth_best}"] = num_unique_words_c
             results[sentence][f"completion_r{choose_nth_best}"] = completion_r
             results[sentence][f"size_ratio_completion_r{choose_nth_best}"] = size_ratio_completion_r
             results[sentence][f"size_ratio_full_r{choose_nth_best}"] = size_ratio_full_r
