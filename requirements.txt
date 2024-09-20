@@ -9,3 +9,6 @@ wandb
 safetensors
 huggingface_hub
 levenshtein
+pydantic
+openai
+instructor

@@ -1,4 +1,6 @@
 
+import os
+from dotenv import load_dotenv
 import argparse
 from typing import Any, Literal
 from pathlib import Path
@@ -15,6 +17,46 @@ import tiktoken
 from huggingface_hub import hf_hub_download
 from rich import print
 import Levenshtein
+from pydantic import BaseModel
+import openai
+import instructor
+
+
+load_dotenv()
+
+
+class Preference(BaseModel):
+    """A preference for one of two completions."""
+    reflection: str
+    better_completion: Literal["completion1", "completion2"]
+
+
+client = instructor.from_openai(openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY")))
+def choose_preference(
+        base_text: str, 
+        completion1: str, 
+        completion2: str, 
+        openai_model: str = "gpt-4o-mini",
+) -> int:
+    preference = client.chat.completions.create(
+        model=openai_model,
+        response_model=Preference,
+        temperature=1.0,
+        messages=[
+            {
+                "role": "system", 
+                "content": (
+                    "Given a base text, and two alternative completions to it, choose the better completion. "
+                    "Better means less repetition, a more grammatically correct and more coherent text, "
+                    "and more similarity to the base text. "
+                    "Reflect on your answer before making a decision."
+                )
+            },
+            {"role": "user", "content": f"{base_text=}\n\{completion1=}\n\{completion2=}"},
+        ],
+        
+    )
+    return 0 if preference.better_completion == "completion1" else 1
 
 
 max_seq_len = 4096
@@ -278,6 +320,38 @@ def calc_l2_loss(logprobs_c1: torch.Tensor, logprobs_c2: torch.Tensor) -> float:
     return F.mse_loss(logprobs_c1, logprobs_c2).item()
 
 
+def calc_preference_stats(
+        sentence: str,
+        completion_c: str, 
+        completion_r: str, 
+        openai_model: str = "gpt-4o-mini",
+        num_samples: int = 10,
+) -> dict[Literal["c", "r"], int]:
+    if num_samples % 2:
+        raise ValueError("num_samples must be even")
+    if not num_samples:
+        raise ValueError("num_samples must be positive")
+    
+    preferences = dict(c=0, r=0)
+    for i in range(num_samples // 2):
+        preference1 = choose_preference(
+            base_text=sentence,
+            completion1=completion_c,
+            completion2=completion_r,
+            openai_model=openai_model,
+        )
+        preference2 = choose_preference(
+            base_text=sentence,
+            completion1=completion_r,
+            completion2=completion_c,
+            openai_model=openai_model,
+        )
+        preferences["c"] += (1 - preference1) + (1 - preference2)
+        preferences["r"] += preference1 + preference2
+        
+    return preferences
+
+
 def test_free_completion(
         net_c: SpeedyLangNet, 
         net_r: SpeedyLangNet, 
@@ -286,6 +360,7 @@ def test_free_completion(
         verbosity: int = 1, 
         max_choose_nth_best: int = 3,
         masking_rate: float = 0.0,
+        num_preference_samples: int = 0,
 ) -> dict[str, Any]:
     results = dict()
     loop = tqdm(sentences, disable=not verbosity)
@@ -317,6 +392,16 @@ def test_free_completion(
             num_unique_words_r = len(set(completion_r.split()))
             num_unique_tokens_r = len(set(encoder.encode_ordinary(completion_r)))
 
+            if num_preference_samples:
+                preferences = calc_preference_stats(
+                    sentence=sentence,
+                    completion_c=completion_c,
+                    completion_r=completion_r,
+                    num_samples=num_preference_samples,
+                )
+                results[sentence][f"preference_c{choose_nth_best}"] = preferences["c"] / num_preference_samples
+                results[sentence][f"preference_r{choose_nth_best}"] = preferences["r"] / num_preference_samples
+
             results[sentence][f"completion_c{choose_nth_best}"] = completion_c
             results[sentence][f"size_ratio_completion_c{choose_nth_best}"] = size_ratio_completion_c
             results[sentence][f"size_ratio_full_c{choose_nth_best}"] = size_ratio_full_c
@@ -336,18 +421,24 @@ def test_free_completion(
     
     summary = dict()
     for choose_nth_best in range(1, max_choose_nth_best+1):
-        summary.update(
-            {
-                f"mean_size_ratio_completion_c{choose_nth_best}": torch.tensor([results[sentence][f"size_ratio_completion_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
-                f"mean_size_ratio_full_c{choose_nth_best}": torch.tensor([results[sentence][f"size_ratio_full_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
-                f"mean_num_unique_words_c{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_words_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
-                f"mean_num_unique_tokens_c{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_tokens_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
-                f"mean_size_ratio_completion_r{choose_nth_best}": torch.tensor([results[sentence][f"size_ratio_completion_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
-                f"mean_size_ratio_full_r{choose_nth_best}": torch.tensor([results[sentence][f"size_ratio_full_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
-                f"mean_num_unique_words_r{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_words_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
-                f"mean_num_unique_tokens_r{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_tokens_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
-            }
-        )
+        nth_summary = {
+            f"mean_size_ratio_completion_c{choose_nth_best}": torch.tensor([results[sentence][f"size_ratio_completion_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
+            f"mean_size_ratio_full_c{choose_nth_best}": torch.tensor([results[sentence][f"size_ratio_full_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
+            f"mean_num_unique_words_c{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_words_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
+            f"mean_num_unique_tokens_c{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_tokens_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
+            f"mean_size_ratio_completion_r{choose_nth_best}": torch.tensor([results[sentence][f"size_ratio_completion_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
+            f"mean_size_ratio_full_r{choose_nth_best}": torch.tensor([results[sentence][f"size_ratio_full_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
+            f"mean_num_unique_words_r{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_words_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
+            f"mean_num_unique_tokens_r{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_tokens_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
+        }
+        if num_preference_samples:
+            nth_summary.update(
+                {
+                    f"mean_preference_c{choose_nth_best}": torch.tensor([results[sentence][f"preference_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
+                    f"mean_preference_r{choose_nth_best}": torch.tensor([results[sentence][f"preference_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
+                }
+            )
+        summary.update(nth_summary)
     results["summary"] = summary
     return results
 
@@ -469,6 +560,11 @@ def get_args() -> argparse.Namespace:
         type=float, default=0.0,
         help="The masking rate to use. TYPE: float; DEFAULT: 0.0"
     )
+    parser.add_argument(
+        "--num_preference_samples",
+        type=int, default=0,
+        help="The number of samples to use for preference calculation. TYPE: int; DEFAULT: 0"
+    )
 
     return parser.parse_args()
 
@@ -577,6 +673,7 @@ def main():
             verbosity=args.verbosity,
             max_choose_nth_best=args.max_choose_nth_best,
             masking_rate=args.masking_rate,
+            num_preference_samples=args.num_preference_samples,
         )
         if args.verbosity > 0:
             print(results_free_completion.get("summary"))
@@ -584,7 +681,11 @@ def main():
             save_json(
                 data=results_free_completion, 
                 path=args.savefile,
-                postfix=f"free_completion__masking_rate_{round(args.masking_rate * 100)}_percent"
+                postfix=(
+                    f"free_completion__masking_rate_"
+                    f"{round(args.masking_rate * 100)}_percent"
+                    f"__num_preference_samples_{args.num_preference_samples}"
+                )
             )
     if args.no_test_split_sentences:
         print("Testing split sentences")
