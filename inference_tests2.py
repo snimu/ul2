@@ -335,7 +335,7 @@ def test_split_sentences(
     results = dict()
     loop = tqdm(sentences, disable=not verbosity)
     for sentence in loop:
-        results[sentence] = dict(details=[])
+        results[sentence] = dict()
         input_ids = encoder.encode_ordinary(sentence)
         max_completion_len = len(input_ids) // 2
         max_completion_len = max(
