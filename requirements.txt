@@ -12,3 +12,4 @@ levenshtein
 pydantic
 openai
 instructor
+python-dotenv
