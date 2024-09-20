@@ -173,11 +173,20 @@ def download_model(pretrained: str, cache_dir: str = ".") -> str:
 
 @torch.no_grad()
 def generate(
-        net, encoder, query: str, max_gen_tokens: int = 128, until: list[str] | None = None,
+        net: SpeedyLangNet, 
+        encoder: tiktoken.Encoding, 
+        query: str, 
+        max_gen_tokens: int = 128, 
+        until: list[str] | None = None,
         choose_nth_best: int = 1,
+        masking_rate: float = 0.0,
+        mask: int = 50308,
 ) -> tuple[str, torch.Tensor, torch.Tensor]:
     # Encode the input tokens
     input_ids = encoder.encode_ordinary(query)
+    if masking_rate > 0:
+        mask_positions = torch.rand(len(input_ids)) < masking_rate
+        input_ids[mask_positions] = mask
     input_ids = torch.tensor(input_ids, device="cuda", dtype=torch.int).unsqueeze(0)
     input_len = input_ids.shape[1]
     
@@ -275,6 +284,7 @@ def test_free_completion(
         sentences: list[str], 
         verbosity: int = 1, 
         max_choose_nth_best: int = 3,
+        masking_rate: float = 0.0,
 ) -> dict[str, Any]:
     results = dict()
     loop = tqdm(sentences, disable=not verbosity)
@@ -282,12 +292,24 @@ def test_free_completion(
         results[sentence] = dict()
         for choose_nth_best in range(1, max_choose_nth_best+1):
             loop.set_description(f"{choose_nth_best=}/{max_choose_nth_best}")
-            completion_c, _, _ = generate(net_c, encoder, sentence, max_gen_tokens=50, choose_nth_best=choose_nth_best)
+            completion_c, _, _ = generate(
+                net=net_c,
+                query=sentence,
+                max_gen_tokens=50,
+                choose_nth_best=choose_nth_best,
+                masking_rate=masking_rate,
+            )
             size_ratio_completion_c, size_ratio_full_c = calc_ratio_compression(completion_c, sentence+completion_c)
             num_unique_words_c = len(set(completion_c.split()))
             num_unique_tokens_c = len(set(encoder.encode_ordinary(completion_c)))
 
-            completion_r, _, _ = generate(net_r, encoder, sentence, max_gen_tokens=50, choose_nth_best=choose_nth_best)
+            completion_r, _, _ = generate(
+                net=net_r,
+                query=sentence,
+                max_gen_tokens=50,
+                choose_nth_best=choose_nth_best,
+                masking_rate=masking_rate,
+            )
             size_ratio_completion_r, size_ratio_full_r = calc_ratio_compression(completion_r, sentence+completion_r)
             num_unique_words_r = len(set(completion_r.split()))
             num_unique_tokens_r = len(set(encoder.encode_ordinary(completion_r)))
@@ -424,6 +446,11 @@ def get_args() -> argparse.Namespace:
         type=int, default=3,
         help="The maximum number of nth best completions to test. TYPE: int; DEFAULT: 3"
     )
+    parser.add_argument(
+        "--masking_rate",
+        type=float, default=0.0,
+        help="The masking rate to use. TYPE: float; DEFAULT: 0.0"
+    )
 
     return parser.parse_args()
 
@@ -531,11 +558,16 @@ def main():
             sentences=sentences, 
             verbosity=args.verbosity,
             max_choose_nth_best=args.max_choose_nth_best,
+            masking_rate=args.masking_rate,
         )
         if args.verbosity > 0:
             print(results_free_completion.get("summary"))
         if args.savefile:
-            save_json(results_free_completion, args.savefile, "free_completion")
+            save_json(
+                data=results_free_completion, 
+                path=args.savefile,
+                postfix=f"free_completion__masking_rate_{round(args.masking_rate * 100)}"
+            )
     if args.no_test_split_sentences:
         print("Testing split sentences")
         results_split_sentences = test_split_sentences(
@@ -545,11 +577,16 @@ def main():
             sentences=sentences, 
             verbosity=args.verbosity,
             max_choose_nth_best=args.max_choose_nth_best,
+            masking_rate=args.masking_rate,
         )
         if args.verbosity > 0:
             print(results_split_sentences.get("summary"))
         if args.savefile:
-            save_json(results_split_sentences, args.savefile, "split_sentences")
+            save_json(
+                data=results_split_sentences, 
+                path=args.savefile,
+                postfix=f"split_sentences__masking_rate_{round(args.masking_rate * 100)}"
+            )
 
 
 if __name__ == "__main__":
