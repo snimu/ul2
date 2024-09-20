@@ -285,19 +285,23 @@ def test_free_completion(
             completion_c, _, _ = generate(net_c, encoder, sentence, max_gen_tokens=50, choose_nth_best=choose_nth_best)
             size_ratio_completion_c, size_ratio_full_c = calc_ratio_compression(completion_c, sentence+completion_c)
             num_unique_words_c = len(set(completion_c.split()))
+            num_unique_tokens_c = len(set(encoder.encode_ordinary(completion_c)))
 
             completion_r, _, _ = generate(net_r, encoder, sentence, max_gen_tokens=50, choose_nth_best=choose_nth_best)
             size_ratio_completion_r, size_ratio_full_r = calc_ratio_compression(completion_r, sentence+completion_r)
             num_unique_words_r = len(set(completion_r.split()))
+            num_unique_tokens_r = len(set(encoder.encode_ordinary(completion_r)))
 
             results[sentence][f"completion_c{choose_nth_best}"] = completion_c
             results[sentence][f"size_ratio_completion_c{choose_nth_best}"] = size_ratio_completion_c
             results[sentence][f"size_ratio_full_c{choose_nth_best}"] = size_ratio_full_c
             results[sentence][f"num_unique_words_c{choose_nth_best}"] = num_unique_words_c
+            results[sentence][f"num_unique_tokens_c{choose_nth_best}"] = num_unique_tokens_c
             results[sentence][f"completion_r{choose_nth_best}"] = completion_r
             results[sentence][f"size_ratio_completion_r{choose_nth_best}"] = size_ratio_completion_r
             results[sentence][f"size_ratio_full_r{choose_nth_best}"] = size_ratio_full_r
             results[sentence][f"num_unique_words_r{choose_nth_best}"] = num_unique_words_r
+            results[sentence][f"num_unique_tokens_r{choose_nth_best}"] = num_unique_tokens_r
 
         if verbosity > 1:
             print(
