@@ -428,6 +428,13 @@ def get_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def save_json(data: dict, path: str, postfix: str = ""):
+    name = path.split(".")[0]
+    ending = path.split(".")[1] if len(path.split(".")) > 1 else "json"
+    with open(f"{name}_{postfix}.{ending}", "w") as f:
+        json.dump(data, f, indent=2)
+
+
 def main():
     """Test if the model weights are correctly loaded"""
     args = get_args()
@@ -528,8 +535,7 @@ def main():
         if args.verbosity > 0:
             print(results_free_completion.get("summary"))
         if args.savefile:
-            with open(args.savefile, "w") as f:
-                json.dump(results_free_completion, f, indent=2)
+            save_json(results_free_completion, args.savefile, "free_completion")
     if args.no_test_split_sentences:
         print("Testing split sentences")
         results_split_sentences = test_split_sentences(
@@ -543,8 +549,7 @@ def main():
         if args.verbosity > 0:
             print(results_split_sentences.get("summary"))
         if args.savefile:
-            with open(args.savefile, "w") as f:
-                json.dump(results_split_sentences, f, indent=2)
+            save_json(results_split_sentences, args.savefile, "split_sentences")
 
 
 if __name__ == "__main__":
