@@ -350,7 +350,7 @@ def test_split_sentences(
             for choose_nth_best in range(1, max_choose_nth_best+1):
                 loop.set_description(
                     f"{completion_length=}/{max_completion_len}, "
-                    f"{choose_nth_best=}/{max_choose_nth_best=}"
+                    f"{choose_nth_best=}/{max_choose_nth_best}"
                 ) 
                 completion_c, _, logprobs_c = generate(net_c, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=choose_nth_best)
                 completion_r, _, logprobs_r = generate(net_r, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=choose_nth_best)
