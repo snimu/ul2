@@ -365,6 +365,7 @@ def test_split_sentences(
                 details[f"ce_loss_r{choose_nth_best}"] = calc_ce_loss(logprobs_r, target_ids)
                 details[f"l2_loss_{choose_nth_best}"] = calc_l2_loss(logprobs_c, logprobs_r)
 
+            results[sentence][f"completion_length_{completion_length}"] = details
             if verbosity > 1:
                 print(results[sentence]["details"][-1])
 
@@ -372,13 +373,13 @@ def test_split_sentences(
     for choose_nth_best in range(1, max_choose_nth_best+1):
         summary.update(
             {
-                f"mean_acc_c{choose_nth_best}": sum([d[f"acc_c{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
-                f"mean_ce_loss_c{choose_nth_best}": sum([d[f"ce_loss_c{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
-                f"mean_edit_distance_c{choose_nth_best}": sum([d[f"edit_distance_c{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
-                f"mean_acc_r{choose_nth_best}": sum([d[f"acc_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
-                f"mean_ce_loss_r{choose_nth_best}": sum([d[f"ce_loss_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
-                f"mean_edit_distance_r{choose_nth_best}": sum([d[f"edit_distance_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
-                f"mean_l2_loss_{choose_nth_best}": sum([d[f"l2_loss_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
+                f"mean_acc_c{choose_nth_best}": sum([results[sentence][completion_len][f"acc_c{choose_nth_best}"] for completion_len in results[sentence]]) / len(results[sentence]),
+                f"mean_ce_loss_c{choose_nth_best}": sum([results[sentence][completion_len][f"ce_loss_c{choose_nth_best}"] for completion_len in results[sentence]]) / len(results[sentence]),
+                f"mean_edit_distance_c{choose_nth_best}": sum([results[sentence][completion_len][f"edit_distance_c{choose_nth_best}"] for completion_len in results[sentence]]) / len(results[sentence]),
+                f"mean_acc_r{choose_nth_best}": sum([results[sentence][completion_len][f"acc_r{choose_nth_best}"] for completion_len in results[sentence]]) / len(results[sentence]),
+                f"mean_ce_loss_r{choose_nth_best}": sum([results[sentence][completion_len][f"ce_loss_r{choose_nth_best}"] for completion_len in results[sentence]]) / len(results[sentence]),
+                f"mean_edit_distance_r{choose_nth_best}": sum([results[sentence][completion_len][f"edit_distance_r{choose_nth_best}"] for completion_len in results[sentence]]) / len(results[sentence]),
+                f"mean_l2_loss_{choose_nth_best}": sum([results[sentence][completion_len][f"l2_loss_{choose_nth_best}"] for completion_len in results[sentence]]) / len(results[sentence]),
             }
         )
     results["summary"] = summary
