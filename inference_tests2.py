@@ -269,72 +269,34 @@ def calc_l2_loss(logprobs_c1: torch.Tensor, logprobs_c2: torch.Tensor) -> float:
 
 
 def test_free_completion(
-        net_c, net_r, encoder, sentences, verbosity: int = 1
+        net_c: SpeedyLangNet, 
+        net_r: SpeedyLangNet, 
+        encoder: tiktoken.Encoding, 
+        sentences: list[str], 
+        verbosity: int = 1, 
+        max_choose_nth_best: int = 3,
 ) -> dict[str, Any]:
     results = dict()
+    loop = tqdm(sentences, disable=not verbosity)
     for sentence in tqdm(sentences, disable=not verbosity):
-        completion_c1, _, _ = generate(net_c, encoder, sentence, max_gen_tokens=50)
-        size_ratio_completion_c1, size_ratio_full_c1 = calc_ratio_compression(completion_c1, sentence+completion_c1)
-        num_unique_words_c1 = len(set(completion_c1.split()))
-        num_unique_tokens_c1 = len(set(encoder.encode_ordinary(completion_c1)))
+        for choose_nth_best in loop:
+            loop.set_description(f"{choose_nth_best=}/{max_choose_nth_best}")
+            completion_c, _, _ = generate(net_c, encoder, sentence, max_gen_tokens=50, choose_nth_best=choose_nth_best)
+            size_ratio_completion_c, size_ratio_full_c = calc_ratio_compression(completion_c, sentence+completion_c)
+            num_unique_words_c = len(set(completion_c.split()))
 
-        completion_r1, _, _ = generate(net_r, encoder, sentence, max_gen_tokens=50)
-        size_ratio_completion_r1, size_ratio_full_r1 = calc_ratio_compression(completion_r1, sentence+completion_r1)
-        num_unique_words_r1 = len(set(completion_r1.split()))
-        num_unique_tokens_r1 = len(set(encoder.encode_ordinary(completion_r1)))
+            completion_r, _, _ = generate(net_r, encoder, sentence, max_gen_tokens=50, choose_nth_best=choose_nth_best)
+            size_ratio_completion_r, size_ratio_full_r = calc_ratio_compression(completion_r, sentence+completion_r)
+            num_unique_words_r = len(set(completion_r.split()))
 
-        completion_c2, _, _ = generate(net_c, encoder, sentence, max_gen_tokens=50, choose_nth_best=2)
-        size_ratio_completion_c2, size_ratio_full_c2 = calc_ratio_compression(completion_c2, sentence+completion_c2)
-        num_unique_words_c2 = len(set(completion_c2.split()))
-        num_unique_tokens_c2 = len(set(encoder.encode_ordinary(completion_c2)))
-
-        completion_r2, _, _ = generate(net_r, encoder, sentence, max_gen_tokens=50, choose_nth_best=2)
-        size_ratio_completion_r2, size_ratio_full_r2 = calc_ratio_compression(completion_r2, sentence+completion_r2)
-        num_unique_words_r2 = len(set(completion_r2.split()))
-        num_unique_tokens_r2 = len(set(encoder.encode_ordinary(completion_r2)))
-
-        completion_c3, _, _ = generate(net_c, encoder, sentence, max_gen_tokens=50, choose_nth_best=3)
-        size_ratio_completion_c3, size_ratio_full_c3 = calc_ratio_compression(completion_c3, sentence+completion_c3)
-        num_unique_words_c3 = len(set(completion_c3.split()))
-        num_unique_tokens_c3 = len(set(encoder.encode_ordinary(completion_c3)))
-
-        completion_r3, _, _ = generate(net_r, encoder, sentence, max_gen_tokens=50, choose_nth_best=3)
-        size_ratio_completion_r3, size_ratio_full_r3 = calc_ratio_compression(completion_r3, sentence+completion_r3)
-        num_unique_words_r3 = len(set(completion_r3.split()))
-        num_unique_tokens_r3 = len(set(encoder.encode_ordinary(completion_r3)))
-
-        results[sentence] = {
-            "completion_c1": completion_c1,
-            "size_ratio_completion_c1": size_ratio_completion_c1,
-            "size_ratio_full_c1": size_ratio_full_c1,
-            "num_unique_words_c1": num_unique_words_c1,
-            "num_unique_tokens_c1": num_unique_tokens_c1,
-            "completion_c2": completion_c2,
-            "size_ratio_completion_c2": size_ratio_completion_c2,
-            "size_ratio_full_c2": size_ratio_full_c2,
-            "num_unique_words_c2": num_unique_words_c2,
-            "num_unique_tokens_c2": num_unique_tokens_c2,
-            "completion_c3": completion_c3,
-            "size_ratio_completion_c3": size_ratio_completion_c3,
-            "size_ratio_full_c3": size_ratio_full_c3,
-            "num_unique_words_c3": num_unique_words_c3,
-            "num_unique_tokens_c3": num_unique_tokens_c3,
-            "completion_r1": completion_r1,
-            "size_ratio_completion_r1": size_ratio_completion_r1,
-            "size_ratio_full_r1": size_ratio_full_r1,
-            "num_unique_words_r1": num_unique_words_r1,
-            "num_unique_tokens_r1": num_unique_tokens_r1,
-            "completion_r2": completion_r2,
-            "size_ratio_completion_r2": size_ratio_completion_r2,
-            "size_ratio_full_r2": size_ratio_full_r2,
-            "num_unique_words_r2": num_unique_words_r2,
-            "num_unique_tokens_r2": num_unique_tokens_r2,
-            "completion_r3": completion_r3,
-            "size_ratio_completion_r3": size_ratio_completion_r3,
-            "size_ratio_full_r3": size_ratio_full_r3,
-            "num_unique_words_r3": num_unique_words_r3,
-            "num_unique_tokens_r3": num_unique_tokens_r3,
-        }
+            results[sentence][f"completion_{choose_nth_best}"] = completion_c
+            results[sentence][f"size_ratio_completion_{choose_nth_best}"] = size_ratio_completion_c
+            results[sentence][f"size_ratio_full_{choose_nth_best}"] = size_ratio_full_c
+            results[sentence][f"num_unique_words_{choose_nth_best}"] = num_unique_words_c
+            results[sentence][f"completion_r{choose_nth_best}"] = completion_r
+            results[sentence][f"size_ratio_completion_r{choose_nth_best}"] = size_ratio_completion_r
+            results[sentence][f"size_ratio_full_r{choose_nth_best}"] = size_ratio_full_r
+            results[sentence][f"num_unique_words_r{choose_nth_best}"] = num_unique_words_r
 
         if verbosity > 1:
             print(
@@ -342,32 +304,20 @@ def test_free_completion(
                 f"{results[sentence]=}\n\n"
             )
     
-    summary = {
-        "mean_size_ratio_completion_c1": torch.tensor([results[sentence]["size_ratio_completion_c1"] for sentence in results]).float().mean().item(),
-        "mean_size_ratio_full_c1": torch.tensor([results[sentence]["size_ratio_full_c1"] for sentence in results]).float().mean().item(),
-        "mean_num_unique_words_c1": torch.tensor([results[sentence]["num_unique_words_c1"] for sentence in results]).float().mean().item(),
-        "mean_num_unique_tokens_c1": torch.tensor([results[sentence]["num_unique_tokens_c1"] for sentence in results]).float().mean().item(),
-        "mean_size_ratio_completion_c2": torch.tensor([results[sentence]["size_ratio_completion_c2"] for sentence in results]).float().mean().item(),
-        "mean_size_ratio_full_c2": torch.tensor([results[sentence]["size_ratio_full_c2"] for sentence in results]).float().mean().item(),
-        "mean_num_unique_words_c2": torch.tensor([results[sentence]["num_unique_words_c2"] for sentence in results]).float().mean().item(),
-        "mean_num_unique_tokens_c2": torch.tensor([results[sentence]["num_unique_tokens_c2"] for sentence in results]).float().mean().item(),
-        "mean_size_ratio_completion_c3": torch.tensor([results[sentence]["size_ratio_completion_c3"] for sentence in results]).float().mean().item(),
-        "mean_size_ratio_full_c3": torch.tensor([results[sentence]["size_ratio_full_c3"] for sentence in results]).float().mean().item(),
-        "mean_num_unique_words_c3": torch.tensor([results[sentence]["num_unique_words_c3"] for sentence in results]).float().mean().item(),
-        "mean_num_unique_tokens_c3": torch.tensor([results[sentence]["num_unique_tokens_c3"] for sentence in results]).float().mean().item(),
-        "mean_size_ratio_completion_r1": torch.tensor([results[sentence]["size_ratio_completion_r1"] for sentence in results]).float().mean().item(),
-        "mean_size_ratio_full_r1": torch.tensor([results[sentence]["size_ratio_full_r1"] for sentence in results]).float().mean().item(),
-        "mean_num_unique_words_r1": torch.tensor([results[sentence]["num_unique_words_r1"] for sentence in results]).float().mean().item(),
-        "mean_num_unique_tokens_r1": torch.tensor([results[sentence]["num_unique_tokens_r1"] for sentence in results]).float().mean().item(),
-        "mean_size_ratio_completion_r2": torch.tensor([results[sentence]["size_ratio_completion_r2"] for sentence in results]).float().mean().item(),
-        "mean_size_ratio_full_r2": torch.tensor([results[sentence]["size_ratio_full_r2"] for sentence in results]).float().mean().item(),
-        "mean_num_unique_words_r2": torch.tensor([results[sentence]["num_unique_words_r2"] for sentence in results]).float().mean().item(),
-        "mean_num_unique_tokens_r2": torch.tensor([results[sentence]["num_unique_tokens_r2"] for sentence in results]).float().mean().item(),
-        "mean_size_ratio_completion_r3": torch.tensor([results[sentence]["size_ratio_completion_r3"] for sentence in results]).float().mean().item(),
-        "mean_size_ratio_full_r3": torch.tensor([results[sentence]["size_ratio_full_r3"] for sentence in results]).float().mean().item(),
-        "mean_num_unique_words_r3": torch.tensor([results[sentence]["num_unique_words_r3"] for sentence in results]).float().mean().item(),
-        "mean_num_unique_tokens_r3": torch.tensor([results[sentence]["num_unique_tokens_r3"] for sentence in results]).float().mean().item(),
-    }
+    summary = dict()
+    for choose_nth_best in range(1, max_choose_nth_best+1):
+        summary.update(
+            {
+                f"mean_size_ratio_completion_c{choose_nth_best}": torch.tensor([results[sentence]["size_ratio_completion_c1"] for sentence in results]).float().mean().item(),
+                f"mean_size_ratio_full_c{choose_nth_best}": torch.tensor([results[sentence]["size_ratio_full_c1"] for sentence in results]).float().mean().item(),
+                f"mean_num_unique_words_c{choose_nth_best}": torch.tensor([results[sentence]["num_unique_words_c1"] for sentence in results]).float().mean().item(),
+                f"mean_num_unique_tokens_c{choose_nth_best}": torch.tensor([results[sentence]["num_unique_tokens_c1"] for sentence in results]).float().mean().item(),
+                f"mean_size_ratio_completion_r{choose_nth_best}": torch.tensor([results[sentence]["size_ratio_completion_r1"] for sentence in results]).float().mean().item(),
+                f"mean_size_ratio_full_r{choose_nth_best}": torch.tensor([results[sentence]["size_ratio_full_r1"] for sentence in results]).float().mean().item(),
+                f"mean_num_unique_words_r{choose_nth_best}": torch.tensor([results[sentence]["num_unique_words_r1"] for sentence in results]).float().mean().item(),
+                f"mean_num_unique_tokens_r{choose_nth_best}": torch.tensor([results[sentence]["num_unique_tokens_r1"] for sentence in results]).float().mean().item(),
+            }
+        )
     results["summary"] = summary
     return results
 
@@ -380,10 +330,9 @@ def test_split_sentences(
         verbosity: int = 1, 
         min_completion_len: int = 10,
         step_between_completion_lengths: int = 10,
+        max_choose_nth_best: int = 3,
 ) -> dict[str, dict[str, Any | list[dict[str, Any]]]]: 
     results = dict()
-    ce_loss  = nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
-    l2_loss  = nn.MSELoss(reduction='mean')
     loop = tqdm(sentences, disable=not verbosity)
     for sentence in loop:
         results[sentence] = dict(details=[])
@@ -395,115 +344,52 @@ def test_split_sentences(
         )
         completion_lengths = list(range(min_completion_len, max_completion_len+1, step_between_completion_lengths))
         for i, completion_length in enumerate(completion_lengths):
-            loop.set_description(f"Splitting sentence {i+1}/{len(completion_lengths)}")
             partial_sentence = encoder.decode(input_ids[:-completion_length])
             target_ids = torch.tensor(input_ids[-completion_length:]).to("cuda")
-            completion_c1, _, logprobs_c1 = generate(net_c, encoder, partial_sentence, max_gen_tokens=completion_length)
-            completion_c2, _, logprobs_c2 = generate(net_c, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=2)
-            completion_c3, _, logprobs_c3 = generate(net_c, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=3)
-            completion_r1, _, logprobs_r1 = generate(net_r, encoder, partial_sentence, max_gen_tokens=completion_length)
-            completion_r2, _, logprobs_r2 = generate(net_r, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=2)
-            completion_r3, _, logprobs_r3 = generate(net_r, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=3)
+            details = dict(partial_sentence=partial_sentence, target_ids=target_ids)
+            for choose_nth_best in range(1, max_choose_nth_best+1):
+                loop.set_description(
+                    f"{completion_length=}/{max_completion_len}, "
+                    f"{choose_nth_best=}/{max_choose_nth_best=}"
+                ) 
+                completion_c, _, logprobs_c = generate(net_c, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=choose_nth_best)
+                completion_r, _, logprobs_r = generate(net_r, encoder, partial_sentence, max_gen_tokens=completion_length, choose_nth_best=choose_nth_best)
 
-            results[sentence]["details"].append(
-                dict(
-                    partial_sentence=partial_sentence,
-                    completion_c1=completion_c1,
-                    edit_distance_c1=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_c1)),
-                    acc_c1=calc_acc(completion_c1, target_ids, encoder),
-                    ce_loss_c1=calc_ce_loss(logprobs_c1, target_ids),
-                    completion_c2=completion_c2,
-                    edit_distance_c2=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_c2)),
-                    acc_c2=calc_acc(completion_c2, target_ids, encoder),
-                    ce_loss_c2=calc_ce_loss(logprobs_c2, target_ids),
-                    completion_c3=completion_c3,
-                    edit_distance_c3=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_c3)),
-                    acc_c3=calc_acc(completion_c3, target_ids, encoder),
-                    ce_loss_c3=calc_ce_loss(logprobs_c3, target_ids),
-                    completion_r1=completion_r1,
-                    edit_distance_r1=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_r1)),
-                    acc_r1=calc_acc(completion_r1, target_ids, encoder),
-                    ce_loss_r1=calc_ce_loss(logprobs_r1, target_ids),
-                    completion_r2=completion_r2,
-                    edit_distance_r2=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_r2)),
-                    acc_r2=calc_acc(completion_r2, target_ids, encoder),
-                    ce_loss_r2=calc_ce_loss(logprobs_r2, target_ids),
-                    completion_r3=completion_r3,
-                    edit_distance_r3=Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_r3)),
-                    acc_r3=calc_acc(completion_r3, target_ids, encoder),
-                    ce_loss_r3=calc_ce_loss(logprobs_r3, target_ids),
-                    l2_loss_c1_c2=calc_l2_loss(logprobs_c1, logprobs_c2),
-                    l2_loss_c1_c3=calc_l2_loss(logprobs_c1, logprobs_c3),
-                    l2_loss_c2_c3=calc_l2_loss(logprobs_c2, logprobs_c3),
-                    l2_loss_r1_r2=calc_l2_loss(logprobs_r1, logprobs_r2),
-                    l2_loss_r1_r3=calc_l2_loss(logprobs_r1, logprobs_r3),
-                    l2_loss_r2_r3=calc_l2_loss(logprobs_r2, logprobs_r3),
-                    l2_loss_c1_r1=calc_l2_loss(logprobs_c1, logprobs_r1),
-                    l2_loss_c2_r2=calc_l2_loss(logprobs_c2, logprobs_r2),
-                    l2_loss_c3_r3=calc_l2_loss(logprobs_c3, logprobs_r3),
-                )
-            )
+                details[f"completion_{choose_nth_best}"] = completion_c
+                details[f"edit_distance_{choose_nth_best}"] = Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_c))
+                details[f"acc_{choose_nth_best}"] = calc_acc(completion_c, target_ids, encoder)
+                details[f"ce_loss_{choose_nth_best}"] = calc_ce_loss(logprobs_c, target_ids)
+                details[f"completion_r{choose_nth_best}"] = completion_r
+                details[f"edit_distance_r{choose_nth_best}"] = Levenshtein.distance(target_ids.tolist(), encoder.encode_ordinary(completion_r))
+                details[f"acc_r{choose_nth_best}"] = calc_acc(completion_r, target_ids, encoder)
+                details[f"ce_loss_r{choose_nth_best}"] = calc_ce_loss(logprobs_r, target_ids)
+                details[f"l2_loss_{choose_nth_best}"] = calc_l2_loss(logprobs_c, logprobs_r)
 
             if verbosity > 1:
                 print(results[sentence]["details"][-1])
         
-        results[sentence]["mean_acc_c1"] = sum([d["acc_c1"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_ce_loss_c1"] = sum([d["ce_loss_c1"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_edit_distance_c1"] = sum([d["edit_distance_c1"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_acc_c2"] = sum([d["acc_c2"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_ce_loss_c2"] = sum([d["ce_loss_c2"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_edit_distance_c2"] = sum([d["edit_distance_c2"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_acc_c3"] = sum([d["acc_c3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_ce_loss_c3"] = sum([d["ce_loss_c3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_edit_distance_c3"] = sum([d["edit_distance_c3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_acc_r1"] = sum([d["acc_r1"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_ce_loss_r1"] = sum([d["ce_loss_r1"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_edit_distance_r1"] = sum([d["edit_distance_r1"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_acc_r2"] = sum([d["acc_r2"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_ce_loss_r2"] = sum([d["ce_loss_r2"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_edit_distance_r2"] = sum([d["edit_distance_r2"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_acc_r3"] = sum([d["acc_r3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_ce_loss_r3"] = sum([d["ce_loss_r3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_edit_distance_r3"] = sum([d["edit_distance_r3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_l2_loss_c1_c2"] = sum([d["l2_loss_c1_c2"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_l2_loss_c1_c3"] = sum([d["l2_loss_c1_c3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_l2_loss_c2_c3"] = sum([d["l2_loss_c2_c3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_l2_loss_r1_r2"] = sum([d["l2_loss_r1_r2"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_l2_loss_r1_r3"] = sum([d["l2_loss_r1_r3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_l2_loss_r2_r3"] = sum([d["l2_loss_r2_r3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_l2_loss_c1_r1"] = sum([d["l2_loss_c1_r1"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_l2_loss_c2_r2"] = sum([d["l2_loss_c2_r2"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-        results[sentence]["mean_l2_loss_c3_r3"] = sum([d["l2_loss_c3_r3"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
-    
-    summary = {
-        "mean_acc_c1": torch.tensor([results[sentence]["mean_acc_c1"] for sentence in results]).float().mean().item(),
-        "mean_ce_loss_c1": torch.tensor([results[sentence]["mean_ce_loss_c1"] for sentence in results]).float().mean().item(),
-        "mean_edit_distance_c1": torch.tensor([results[sentence]["mean_edit_distance_c1"] for sentence in results]).float().mean().item(),
-        "mean_acc_c2": torch.tensor([results[sentence]["mean_acc_c2"] for sentence in results]).float().mean().item(),
-        "mean_ce_loss_c2": torch.tensor([results[sentence]["mean_ce_loss_c2"] for sentence in results]).float().mean().item(),
-        "mean_edit_distance_c2": torch.tensor([results[sentence]["mean_edit_distance_c2"] for sentence in results]).float().mean().item(),
-        "mean_acc_c3": torch.tensor([results[sentence]["mean_acc_c3"] for sentence in results]).float().mean().item(),
-        "mean_ce_loss_c3": torch.tensor([results[sentence]["mean_ce_loss_c3"] for sentence in results]).float().mean().item(),
-        "mean_edit_distance_c3": torch.tensor([results[sentence]["mean_edit_distance_c3"] for sentence in results]).float().mean().item(),
-        "mean_acc_r1": torch.tensor([results[sentence]["mean_acc_r1"] for sentence in results]).float().mean().item(),
-        "mean_ce_loss_r1": torch.tensor([results[sentence]["mean_ce_loss_r1"] for sentence in results]).float().mean().item(),
-        "mean_edit_distance_r1": torch.tensor([results[sentence]["mean_edit_distance_r1"] for sentence in results]).float().mean().item(),
-        "mean_acc_r2": torch.tensor([results[sentence]["mean_acc_r2"] for sentence in results]).float().mean().item(),
-        "mean_ce_loss_r2": torch.tensor([results[sentence]["mean_ce_loss_r2"] for sentence in results]).float().mean().item(),
-        "mean_edit_distance_r2": torch.tensor([results[sentence]["mean_edit_distance_r2"] for sentence in results]).float().mean().item(),
-        "mean_acc_r3": torch.tensor([results[sentence]["mean_acc_r3"] for sentence in results]).float().mean().item(),
-        "mean_ce_loss_r3": torch.tensor([results[sentence]["mean_ce_loss_r3"] for sentence in results]).float().mean().item(),
-        "mean_edit_distance_r3": torch.tensor([results[sentence]["mean_edit_distance_r3"] for sentence in results]).float().mean().item(),
-        "mean_l2_loss_c1_c2": torch.tensor([results[sentence]["mean_l2_loss_c1_c2"] for sentence in results]).float().mean().item(),
-        "mean_l2_loss_c1_c3": torch.tensor([results[sentence]["mean_l2_loss_c1_c3"] for sentence in results]).float().mean().item(),
-        "mean_l2_loss_c2_c3": torch.tensor([results[sentence]["mean_l2_loss_c2_c3"] for sentence in results]).float().mean().item(),
-        "mean_l2_loss_r1_r2": torch.tensor([results[sentence]["mean_l2_loss_r1_r2"] for sentence in results]).float().mean().item(),
-        "mean_l2_loss_r1_r3": torch.tensor([results[sentence]["mean_l2_loss_r1_r3"] for sentence in results]).float().mean().item(),
-        "mean_l2_loss_r2_r3": torch.tensor([results[sentence]["mean_l2_loss_r2_r3"] for sentence in results]).float().mean().item(),
-        "mean_l2_loss_c1_r1": torch.tensor([results[sentence]["mean_l2_loss_c1_r1"] for sentence in results]).float().mean().item(),
-        "mean_l2_loss_c2_r2": torch.tensor([results[sentence]["mean_l2_loss_c2_r2"] for sentence in results]).float().mean().item(),
-        "mean_l2_loss_c3_r3": torch.tensor([results[sentence]["mean_l2_loss_c3_r3"] for sentence in results]).float().mean().item(),
-    }
+        for choose_nth_best in range(1, max_choose_nth_best+1):
+            results[sentence][f"mean_acc_c{choose_nth_best}"] = sum([d[f"acc_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
+            results[sentence][f"mean_ce_loss_c{choose_nth_best}"] = sum([d[f"ce_loss_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
+            results[sentence][f"mean_edit_distance_c{choose_nth_best}"] = sum([d[f"edit_distance_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
+            results[sentence][f"mean_acc_r{choose_nth_best}"] = sum([d[f"acc_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
+            results[sentence][f"mean_ce_loss_r{choose_nth_best}"] = sum([d[f"ce_loss_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
+            results[sentence][f"mean_edit_distance_r{choose_nth_best}"] = sum([d[f"edit_distance_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
+            results[sentence][f"mean_l2_loss_{choose_nth_best}"] = sum([d[f"l2_loss_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"])
+
+    summary = dict()
+    for choose_nth_best in range(1, max_choose_nth_best+1):
+        summary.update(
+            {
+                f"mean_acc_c{choose_nth_best}": sum([d[f"acc_c{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
+                f"mean_ce_loss_c{choose_nth_best}": sum([d[f"ce_loss_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
+                f"mean_edit_distance_c{choose_nth_best}": sum([d[f"edit_distance_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
+                f"mean_acc_r{choose_nth_best}": sum([d[f"acc_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
+                f"mean_ce_loss_r{choose_nth_best}": sum([d[f"ce_loss_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
+                f"mean_edit_distance_r{choose_nth_best}": sum([d[f"edit_distance_r{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
+                f"mean_l2_loss_{choose_nth_best}": sum([d[f"l2_loss_{choose_nth_best}"] for d in results[sentence]["details"]]) / len(results[sentence]["details"]),
+            }
+        )
     results["summary"] = summary
     return results
 
@@ -535,6 +421,11 @@ def get_args() -> argparse.Namespace:
         "--no_test_free_completion",
         action="store_false",
         help="Do not test the free_completion function. TYPE: bool; DEFAULT: True"
+    )
+    parser.add_argument(
+        "--max_choose_nth_best",
+        type=int, default=3,
+        help="The maximum number of nth best completions to test. TYPE: int; DEFAULT: 3"
     )
 
     return parser.parse_args()
@@ -605,7 +496,14 @@ def main():
     encoder = tiktoken.get_encoding("gpt2")
     if args.no_test_free_completion:
         print("Testing free completion")
-        results_free_completion = test_free_completion(net_c, net_r, encoder, sentences, verbosity=args.verbosity)
+        results_free_completion = test_free_completion(
+            net_c=net_c, 
+            net_r=net_r, 
+            encoder=encoder, 
+            sentences=sentences, 
+            verbosity=args.verbosity,
+            max_choose_nth_best=args.max_choose_nth_best,
+        )
         if args.verbosity > 0:
             print(results_free_completion.get("summary"))
         if args.savefile:
@@ -613,7 +511,14 @@ def main():
                 json.dump(results_free_completion, f, indent=2)
     if args.no_test_split_sentences:
         print("Testing split sentences")
-        results_split_sentences = test_split_sentences(net_c, net_r, encoder, sentences, verbosity=args.verbosity)
+        results_split_sentences = test_split_sentences(
+            net_c=net_c, 
+            net_r=net_r, 
+            encoder=encoder, 
+            sentences=sentences, 
+            verbosity=args.verbosity,
+            max_choose_nth_best=args.max_choose_nth_best,
+        )
         if args.verbosity > 0:
             print(results_split_sentences.get("summary"))
         if args.savefile:
