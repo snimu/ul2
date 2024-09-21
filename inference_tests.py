@@ -536,9 +536,9 @@ def get_args() -> argparse.Namespace:
         help="The verbosity level. TYPE: int; DEFAULT: 1"
     )
     parser.add_argument(
-        "--savefile",
-        type=str, default=None,
-        help="The file to save the results to. TYPE: str; DEFAULT: None"
+        "--save",
+        action="store_true",
+        help="Save the results to a file. TYPE: bool; DEFAULT: False"
     )
     parser.add_argument(
         "--no_test_split_sentences",
@@ -677,13 +677,12 @@ def main():
         )
         if args.verbosity > 0:
             print(results_free_completion.get("summary"))
-        if args.savefile:
+        if args.save:
             save_json(
                 data=results_free_completion, 
-                path=args.savefile,
-                postfix=(
-                    f"free_completion__masking_rate_"
-                    f"{round(args.masking_rate * 100)}_percent"
+                path=(
+                    f"free_completion__{args.model_size}M"
+                    f"__masking_rate_{round(args.masking_rate * 100)}_percent"
                     f"__num_preference_samples_{args.num_preference_samples}"
                 )
             )
@@ -703,8 +702,10 @@ def main():
         if args.savefile:
             save_json(
                 data=results_split_sentences, 
-                path=args.savefile,
-                postfix=f"split_sentences__masking_rate_{round(args.masking_rate * 100)}_percent"
+                path=(
+                    f"split_sentences__{args.model_size}M__"
+                    f"masking_rate_{round(args.masking_rate * 100)}_percent"
+                )
             )
 
 
