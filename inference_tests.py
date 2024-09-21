@@ -681,7 +681,7 @@ def main():
             save_json(
                 data=results_free_completion, 
                 path=(
-                    f"free_completion__{args.model_size}M"
+                    f"{args.model_size}_free_completion" 
                     f"__masking_rate_{round(args.masking_rate * 100)}_percent"
                     f"__num_preference_samples_{args.num_preference_samples}"
                 )
@@ -703,7 +703,7 @@ def main():
             save_json(
                 data=results_split_sentences, 
                 path=(
-                    f"split_sentences__{args.model_size}M__"
+                    f"{args.model_size}_split_sentences__"
                     f"masking_rate_{round(args.masking_rate * 100)}_percent"
                 )
             )
