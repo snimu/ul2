@@ -699,7 +699,7 @@ def main():
         )
         if args.verbosity > 0:
             print(results_split_sentences.get("summary"))
-        if args.savefile:
+        if args.save:
             save_json(
                 data=results_split_sentences, 
                 path=(
