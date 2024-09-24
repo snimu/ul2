@@ -213,17 +213,16 @@ def download_model(pretrained: str, cache_dir: str = ".") -> str:
     return str(model_path)
 
 
-# TODO: stepsize: int = 1,
 @torch.no_grad()
 def generate(
         net: SpeedyLangNet, 
         encoder: tiktoken.Encoding, 
         query: str, 
-        max_gen_tokens: int = 128, 
-        until: list[str] | None = None,
+        min_gen_tokens: int = 128, 
         choose_nth_best: int = 1,
         masking_rate: float = 0.0,
         mask: int = 50308,
+        stepsize: int = 1,
 ) -> tuple[str, torch.Tensor, torch.Tensor]:
     # Encode the input tokens
     input_ids = encoder.encode_ordinary(query)
@@ -237,14 +236,23 @@ def generate(
     # Generate the output tokens
     output_str = []
     all_ids = input_ids
-    while len(encoder.encode_ordinary("".join(output_str))) < max_gen_tokens:
-        logits: torch.Tensor = net(all_ids)
-        output_id = logits[:, -1, :50304].topk(choose_nth_best, dim=-1).indices[:, -1].item()  # ignore last token position, only decode valid token indices ( up to50304)
-        char = encoder.decode([output_id])
-        output_str.append(char)
-        all_ids = torch.cat([all_ids, torch.tensor([output_id], device="cuda", dtype=torch.int).unsqueeze(0)], dim=1)
-        if until and char in until:
-            break
+    while len(encoder.encode_ordinary("".join(output_str))) < min_gen_tokens:
+        if stepsize == 1:
+            inf_ids = all_ids
+        else:
+            inf_ids = torch.cat(
+                [
+                    all_ids, 
+                    torch.empty((1, stepsize-1), device="cuda", dtype=torch.int).fill_(mask),
+                ],
+                dim=1,
+            )
+
+        logits: torch.Tensor = net(inf_ids)
+        output_ids = logits[:, -stepsize:, :50304].topk(choose_nth_best, dim=-1).indices[:, -1].tolist()  # ignore last token position, only decode valid token indices ( up to50304)
+        chars = encoder.decode(output_ids)
+        output_str.extend(chars)
+        all_ids = torch.cat([all_ids, torch.tensor(output_ids, device="cuda", dtype=torch.int).unsqueeze(0)], dim=1)
 
     # Get the logprops
     logprobs = F.softmax(net(all_ids), dim=-1).log()
@@ -389,6 +397,7 @@ def test_free_completion(
         max_choose_nth_best: int = 3,
         masking_rate: float = 0.0,
         num_preference_samples: int = 0,
+        stepsize: int = 1,
 ) -> dict[str, Any]:
     results = dict()
     loop = tqdm(sentences, disable=not verbosity)
@@ -400,9 +409,10 @@ def test_free_completion(
                 net=net_c,
                 encoder=encoder,
                 query=sentence,
-                max_gen_tokens=50,
+                min_gen_tokens=50,
                 choose_nth_best=choose_nth_best,
                 masking_rate=masking_rate,
+                stepsize=stepsize,
             )
             size_ratio_completion_c, size_ratio_full_c = calc_ratio_compression(completion_c, sentence+completion_c)
             num_unique_words_c = len(set(completion_c.split()))
@@ -412,9 +422,10 @@ def test_free_completion(
                 net=net_r,
                 encoder=encoder,
                 query=sentence,
-                max_gen_tokens=50,
+                min_gen_tokens=50,
                 choose_nth_best=choose_nth_best,
                 masking_rate=masking_rate,
+                stepsize=stepsize,
             )
             size_ratio_completion_r, size_ratio_full_r = calc_ratio_compression(completion_r, sentence+completion_r)
             num_unique_words_r = len(set(completion_r.split()))
@@ -482,6 +493,7 @@ def test_split_sentences(
         step_between_completion_lengths: int = 10,
         max_choose_nth_best: int = 3,
         masking_rate: float = 0.0,
+        stepsize: int = 1,
 ) -> dict[str, dict[str, Any | list[dict[str, Any]]]]: 
     results = dict()
     loop = tqdm(sentences, disable=not verbosity)
@@ -507,17 +519,19 @@ def test_split_sentences(
                     net=net_c,
                     encoder=encoder,
                     query=partial_sentence,
-                    max_gen_tokens=completion_length,
+                    min_gen_tokens=completion_length,
                     choose_nth_best=choose_nth_best,
                     masking_rate=masking_rate,
+                    stepsize=stepsize,
                 )
                 completion_r, _, logprobs_r = generate(
                     net=net_r,
                     encoder=encoder,
                     query=partial_sentence,
-                    max_gen_tokens=completion_length,
+                    min_gen_tokens=completion_length,
                     choose_nth_best=choose_nth_best,
                     masking_rate=masking_rate,
+                    stepsize=stepsize,
                 )
 
                 details[f"completion_c{choose_nth_best}"] = completion_c
@@ -593,6 +607,11 @@ def get_args() -> argparse.Namespace:
         "--num_preference_samples",
         type=int, default=0,
         help="The number of samples to use for preference calculation. TYPE: int; DEFAULT: 0"
+    )
+    parser.add_argument(
+        "--stepsize",
+        type=int, default=1,
+        help="The number of steps to use for generation. TYPE: int; DEFAULT: 1"
     )
 
     return parser.parse_args()
@@ -703,6 +722,7 @@ def main():
             max_choose_nth_best=args.max_choose_nth_best,
             masking_rate=args.masking_rate,
             num_preference_samples=args.num_preference_samples,
+            stepsize=args.stepsize,
         )
         if args.verbosity > 0:
             print(results_free_completion.get("summary"))
@@ -713,6 +733,7 @@ def main():
                     f"{args.model_size}_free_completion" 
                     f"__masking_rate_{round(args.masking_rate * 100)}_percent"
                     f"__num_preference_samples_{args.num_preference_samples}"
+                    f"__stepsize_{args.stepsize}"
                 )
             )
     if args.no_test_split_sentences:
@@ -725,6 +746,7 @@ def main():
             verbosity=args.verbosity,
             max_choose_nth_best=args.max_choose_nth_best,
             masking_rate=args.masking_rate,
+            stepsize=args.stepsize,
         )
         if args.verbosity > 0:
             print(results_split_sentences.get("summary"))
@@ -734,6 +756,7 @@ def main():
                 path=(
                     f"{args.model_size}_split_sentences__"
                     f"masking_rate_{round(args.masking_rate * 100)}_percent"
+                    f"__stepsize_{args.stepsize}"
                 )
             )
 
