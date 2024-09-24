@@ -37,7 +37,7 @@ def choose_preference(
         completion1: str, 
         completion2: str, 
         openai_model: str = "gpt-4o-mini",
-) -> int:
+) -> Preference:
     preference = client.chat.completions.create(
         model=openai_model,
         response_model=Preference,
@@ -56,7 +56,7 @@ def choose_preference(
         ],
         
     )
-    return 0 if preference.better_completion == "completion1" else 1
+    return preference
 
 
 max_seq_len = 4096
@@ -213,6 +213,7 @@ def download_model(pretrained: str, cache_dir: str = ".") -> str:
     return str(model_path)
 
 
+# TODO: stepsize: int = 1,
 @torch.no_grad()
 def generate(
         net: SpeedyLangNet, 
@@ -326,13 +327,21 @@ def calc_preference_stats(
         completion_r: str, 
         openai_model: str = "gpt-4o-mini",
         num_samples: int = 10,
-) -> dict[Literal["c", "r"], int]:
+) -> dict[
+        Literal["c", "r", "details"],
+        int | list[
+            dict[
+                Literal["preference_cr", "preference_rc"], 
+                dict[Literal["better_completion", "reflection"], str]
+            ]
+        ]
+]:
     if num_samples % 2:
         raise ValueError("num_samples must be even")
     if not num_samples:
         raise ValueError("num_samples must be positive")
     
-    preferences = dict(c=0, r=0)
+    preferences = dict(c=0, r=0, details=[])
     for i in range(num_samples // 2):
         preference1 = choose_preference(
             base_text=sentence,
@@ -346,8 +355,27 @@ def calc_preference_stats(
             completion2=completion_c,
             openai_model=openai_model,
         )
-        preferences["c"] += (1 - preference1) + (1 - preference2)
-        preferences["r"] += preference1 + preference2
+        preferences["details"].append(
+            {
+                "preference_cr": {
+                    "better_completion": "c" if preference1.better_completion == "completion1" else "r", 
+                    "reflection": preference1.reflection,
+                },
+                "preference_rc": {
+                    "better_completion": "r" if preference2.better_completion == "completion1" else "c", 
+                    "reflection": preference2.reflection,
+                },
+            }   
+        )
+        if preference1.better_completion == "completion1":
+            preferences["c"] += 1
+        else:
+            preferences["r"] += 1
+
+        if preference2.better_completion == "completion1":
+            preferences["r"] += 1
+        else:
+            preferences["c"] += 1
         
     return preferences
 
@@ -393,7 +421,7 @@ def test_free_completion(
             num_unique_tokens_r = len(set(encoder.encode_ordinary(completion_r)))
 
             if num_preference_samples:
-                preferences = calc_preference_stats(
+                preferences = calc_preference_stats(  # TODO: calc prefs btw tok numbers (1st vs 2nd most likely token)
                     sentence=sentence,
                     completion_c=completion_c,
                     completion_r=completion_r,
@@ -401,6 +429,7 @@ def test_free_completion(
                 )
                 results[sentence][f"preference_c{choose_nth_best}"] = preferences["c"] / num_preference_samples
                 results[sentence][f"preference_r{choose_nth_best}"] = preferences["r"] / num_preference_samples
+                results[sentence][f"preference_details_{choose_nth_best}"] = preferences["details"]
 
             results[sentence][f"completion_c{choose_nth_best}"] = completion_c
             results[sentence][f"size_ratio_completion_c{choose_nth_best}"] = size_ratio_completion_c
@@ -572,7 +601,7 @@ def get_args() -> argparse.Namespace:
 def save_json(data: dict, path: str, postfix: str = ""):
     name = path.split(".")[0]
     ending = path.split(".")[1] if len(path.split(".")) > 1 else "json"
-    with open(f"{name}_{postfix}.{ending}", "w") as f:
+    with open(f"{name}{postfix}.{ending}", "w") as f:
         json.dump(data, f, indent=2)
 
 
