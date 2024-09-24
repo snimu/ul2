@@ -213,6 +213,9 @@ def download_model(pretrained: str, cache_dir: str = ".") -> str:
     return str(model_path)
 
 
+# TODO: use as speculative decoding: token in top-k tokens?
+# TODO: test masked prediction with 2nd, 3rd, etc token
+# TODO: For each of those masked generations, the how-many'th non-masked token does it correlate with?
 @torch.no_grad()
 def generate(
         net: SpeedyLangNet, 
