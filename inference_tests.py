@@ -265,40 +265,6 @@ def generate(
     return output_text, logprobs, logprobs.squeeze()[input_len:]
 
 
-@torch.no_grad()
-def generate_with_mask(
-    net: SpeedyLangNet, 
-    encoder: tiktoken.Encoding, 
-    query: str, 
-    max_gen_tokens: int = 128, 
-    mask: int = 50308,
-    choose_nth_best: int = 1,
-) -> tuple[str, torch.Tensor, torch.Tensor]:
-    # Encode the input tokens
-    input_ids = encoder.encode_ordinary(query)
-    input_ids = torch.tensor(input_ids, device="cuda", dtype=torch.int).unsqueeze(0)
-    input_len = input_ids.shape[1]
-
-    all_ids = torch.cat(
-        [
-            input_ids, 
-            torch.empty(
-                (1, max_gen_tokens), 
-                device="cuda", 
-                dtype=torch.int,
-            ).fill_(mask),
-        ], 
-        dim=1,
-    )
-    logits: torch.Tensor = net(all_ids)
-    logprobs = F.log_softmax(logits, dim=-1)
-    outputs = logits[:, input_len:, :50304].topk(choose_nth_best, dim=-1).indices[:, :, -1]
-    outputs = outputs.squeeze().tolist()
-    output_text = encoder.decode(outputs)
-    
-    return output_text, logprobs, logprobs.squeeze()[input_len:]
-
-
 def calc_ratio_compression(completion: str, full: str) -> tuple[float, float]:
     completion_size = len(completion.encode())
     full_size = len(full.encode())
