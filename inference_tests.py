@@ -265,6 +265,51 @@ def generate(
     return output_text, logprobs, logprobs.squeeze()[input_len:]
 
 
+@torch.no_grad()
+def calc_tok_pos_speculative(
+        net: SpeedyLangNet,
+        encoder: tiktoken.Encoding, 
+        query: str,
+        completion: str,
+        logprobs_pred: torch.Tensor,
+        masking_rate: float = 0.0,
+        mask: int = 50308,
+) -> list[int]:
+    # Encode the input tokens
+    input_ids = encoder.encode_ordinary(query)
+    input_ids = torch.tensor(input_ids, device="cuda", dtype=torch.int)
+    if masking_rate > 0:
+        mask_positions = torch.rand(len(input_ids)) < masking_rate
+        input_ids[mask_positions] = mask
+    input_ids = input_ids.unsqueeze(0)
+    input_len = input_ids.shape[1]
+    
+    completion_ids = encoder.encode_ordinary(completion)
+    completion_ids = torch.tensor(completion_ids, device="cuda", dtype=torch.int)
+
+    logits: torch.Tensor = net(torch.cat([input_ids, completion_ids], device="cuda", dtype=torch.int))
+    causal_pred_ids = logits.argmax(dim=-1).squeeze()
+    
+    # input_len : -1 because:
+    #   - input_len: we want to cut off the first prediction because it is a prediction made without a mask
+    #   - -1: the last prediction doesn't predict text that's in the completion; we want to check against the completion -> cut it off
+    logits = logits[input_len : -1]
+    logprobs = F.softmax(logits, dim=-1).log()
+    assert logprobs.shape[-1] == logprobs_pred.shape[-1] - 1  # the first prediction isn't cut off in logprobs_pred
+
+    logprobs_pred = logprobs_pred[1:]
+
+    # Check the how-many'th causal token each masked token is
+    tok_positions = logprobs_pred.argsort(dim=-1, descending=True).squeeze()
+    assert causal_pred_ids.shape[0] == tok_positions.shape[0]
+
+    how_manyth = []
+    for tok_pos, pred_id in zip(tok_positions, causal_pred_ids, strict=True):
+        how_manyth.append(tok_pos[torch.where(tok_pos == pred_id.item())].item())
+
+    return how_manyth
+
+
 def calc_ratio_compression(completion: str, full: str) -> tuple[float, float]:
     completion_size = len(completion.encode())
     full_size = len(full.encode())
@@ -452,6 +497,65 @@ def test_free_completion(
     return results
 
 
+def test_masked_tok_position(
+        net: SpeedyLangNet, 
+        encoder: tiktoken.Encoding, 
+        sentences: list[str], 
+        verbosity: int = 1, 
+        min_completion_len: int = 10,
+        max_choose_nth_best: int = 3,
+        masking_rate: float = 0.0,
+        stepsize: int = 1,
+) -> dict[str, dict[str, Any]]: 
+    results = dict()
+    loop = tqdm(sentences, disable=not verbosity)
+    for sentence in loop:
+        results[sentence] = dict()
+        for choose_nth_best in range(1, max_choose_nth_best+1):
+            loop.set_description(f"{choose_nth_best=}/{max_choose_nth_best}")
+            prediction, _, logprobs = generate(
+                net=net,
+                encoder=encoder,
+                query=sentence,
+                min_gen_tokens=min_completion_len,
+                choose_nth_best=choose_nth_best,
+                masking_rate=masking_rate,
+                stepsize=stepsize,
+            )
+            how_manyth = calc_tok_pos_speculative(
+                net=net,
+                encoder=encoder,
+                query=sentence,
+                completion=prediction,
+                logprobs_pred=logprobs,
+                masking_rate=masking_rate,
+                stepsize=stepsize,
+            )
+            results[sentence][f"how_manyth{choose_nth_best}"] = how_manyth
+            results[sentence][f"mean_pos{choose_nth_best}"] = torch.tensor(how_manyth).float().mean().item()
+            results[sentence][f"max_pos{choose_nth_best}"] = torch.tensor(how_manyth).float().max().item()
+            results[sentence][f"min_pos{choose_nth_best}"] = torch.tensor(how_manyth).float().min().item()
+
+            if verbosity > 1:
+                print(
+                    f"\n\n{sentence=}\n\n"
+                    f"{results[sentence]=}\n\n"
+                )
+    
+    summary = dict()
+    for choose_nth_best in range(1, max_choose_nth_best+1):
+        summary.update(
+            {
+                f"mean_pos_{choose_nth_best}": torch.tensor([results[sentence][f"mean_pos{choose_nth_best}"] for sentence in results]).float().mean().item(),
+                f"max_pos_{choose_nth_best}": torch.tensor([results[sentence][f"max_pos{choose_nth_best}"] for sentence in results]).float().max().item(),
+                f"min_pos_{choose_nth_best}": torch.tensor([results[sentence][f"min_pos{choose_nth_best}"] for sentence in results]).float().min().item(),
+            }
+        )
+    
+    results["summary"] = summary
+    return results
+
+
 def test_split_sentences(
         net_c: SpeedyLangNet, 
         net_r: SpeedyLangNet, 
@@ -561,6 +665,11 @@ def get_args() -> argparse.Namespace:
         "--no_test_free_completion",
         action="store_false",
         help="Do not test the free_completion function. TYPE: bool; DEFAULT: True"
+    )
+    parser.add_argument(
+        "--no_test_masked_tok_position", 
+        action="store_false", 
+        help="Do not test the masked_tok_position function. TYPE: bool; DEFAULT: True",
     )
     parser.add_argument(
         "--max_choose_nth_best",
@@ -728,6 +837,29 @@ def main():
                     f"__stepsize_{args.stepsize}"
                 )
             )
+        if args.no_test_masked_tok_position:
+            print("Testing masked_tok_position")
+            results_masked_tok_position = test_masked_tok_position(
+                net=net_c, 
+                encoder=encoder, 
+                sentences=sentences, 
+                verbosity=args.verbosity,
+                min_completion_len=args.min_completion_len,
+                max_choose_nth_best=args.max_choose_nth_best,
+                masking_rate=args.masking_rate,
+                stepsize=args.stepsize,
+            )
+            if args.verbosity > 0:
+                print(results_masked_tok_position.get("summary"))
+            if args.save:
+                save_json(
+                    data=results_masked_tok_position, 
+                    path=(
+                        f"{args.model_size}_masked_tok_position__"
+                        f"masking_rate_{round(args.masking_rate * 100)}_percent"
+                        f"__stepsize_{args.stepsize}"
+                    )
+                )
 
 
 if __name__ == "__main__":
