@@ -840,7 +840,7 @@ def main():
         if args.no_test_masked_tok_position:
             print("Testing masked_tok_position")
             results_masked_tok_position = test_masked_tok_position(
-                net=net_c, 
+                net=net_r, 
                 encoder=encoder, 
                 sentences=sentences, 
                 verbosity=args.verbosity,
