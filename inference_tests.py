@@ -252,7 +252,7 @@ def generate(
             )
 
         logits: torch.Tensor = net(inf_ids)
-        output_ids = logits[:, -stepsize:, :50304].topk(choose_nth_best, dim=-1).indices[:, -1].tolist()  # ignore last token position, only decode valid token indices ( up to50304)
+        output_ids = logits[:, -stepsize:, :50304].topk(choose_nth_best, dim=-1).indices[:, -1].squeeze().tolist()  # ignore last token position, only decode valid token indices ( up to50304)
         chars = encoder.decode(output_ids)
         output_str.extend(chars)
         all_ids = torch.cat([all_ids, torch.tensor(output_ids, device="cuda", dtype=torch.int).unsqueeze(0)], dim=1)
