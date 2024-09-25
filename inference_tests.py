@@ -844,7 +844,6 @@ def main():
                 encoder=encoder, 
                 sentences=sentences, 
                 verbosity=args.verbosity,
-                min_completion_len=args.min_completion_len,
                 max_choose_nth_best=args.max_choose_nth_best,
                 masking_rate=args.masking_rate,
                 stepsize=args.stepsize,
