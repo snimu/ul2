@@ -838,28 +838,28 @@ def main():
                     f"__stepsize_{args.stepsize}"
                 )
             )
-        if args.no_test_masked_tok_position:
-            print("Testing masked_tok_position")
-            results_masked_tok_position = test_masked_tok_position(
-                net=net_r, 
-                encoder=encoder, 
-                sentences=sentences, 
-                verbosity=args.verbosity,
-                max_choose_nth_best=args.max_choose_nth_best,
-                masking_rate=args.masking_rate,
-                stepsize=args.stepsize,
-            )
-            if args.verbosity > 0:
-                print(results_masked_tok_position.get("summary"))
-            if args.save:
-                save_json(
-                    data=results_masked_tok_position, 
-                    path=(
-                        f"{args.model_size}_masked_tok_position__"
-                        f"masking_rate_{round(args.masking_rate * 100)}_percent"
-                        f"__stepsize_{args.stepsize}"
-                    )
+    if args.no_test_masked_tok_position:
+        print("Testing masked_tok_position")
+        results_masked_tok_position = test_masked_tok_position(
+            net=net_r, 
+            encoder=encoder, 
+            sentences=sentences, 
+            verbosity=args.verbosity,
+            max_choose_nth_best=args.max_choose_nth_best,
+            masking_rate=args.masking_rate,
+            stepsize=args.stepsize,
+        )
+        if args.verbosity > 0:
+            print(results_masked_tok_position.get("summary"))
+        if args.save:
+            save_json(
+                data=results_masked_tok_position, 
+                path=(
+                    f"{args.model_size}_masked_tok_position__"
+                    f"masking_rate_{round(args.masking_rate * 100)}_percent"
+                    f"__stepsize_{args.stepsize}"
                 )
+            )
 
 
 if __name__ == "__main__":
