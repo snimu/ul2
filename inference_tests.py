@@ -530,7 +530,6 @@ def test_masked_tok_position(
                 completion=prediction,
                 logprobs_pred=logprobs,
                 masking_rate=masking_rate,
-                stepsize=stepsize,
             )
             results[sentence][f"how_manyth{choose_nth_best}"] = how_manyth
             results[sentence][f"mean_pos{choose_nth_best}"] = torch.tensor(how_manyth).float().mean().item()
