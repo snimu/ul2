@@ -226,7 +226,7 @@ def generate(
         masking_rate: float = 0.0,
         mask: int = 50308,
         stepsize: int = 1,
-) -> tuple[str, torch.Tensor, torch.Tensor]:
+) -> tuple[str, list[int], torch.Tensor, torch.Tensor]:
     # Encode the input tokens
     input_ids = encoder.encode_ordinary(query)
     input_ids = torch.tensor(input_ids, device="cuda", dtype=torch.int)
@@ -239,6 +239,7 @@ def generate(
     # Generate the output tokens
     output_str = []
     all_ids = input_ids
+    # Compare to encoded tokens of text because some of them get merged & I want to be able to compare to some target text (which also consists of merged tokens)
     while len(encoder.encode_ordinary("".join(output_str))) < min_gen_tokens:
         if stepsize == 1:
             inf_ids = all_ids
@@ -263,7 +264,7 @@ def generate(
     
     # Get the output text
     output_text = "".join(output_str)
-    return output_text, logprobs, logprobs.squeeze()[input_len:]
+    return output_text, all_ids[:, input_len:].tolist(), logprobs, logprobs.squeeze()[input_len:]
 
 
 @torch.no_grad()
@@ -271,7 +272,7 @@ def calc_tok_pos_speculative(
         net: SpeedyLangNet,
         encoder: tiktoken.Encoding, 
         query: str,
-        completion: str,
+        gen_toks: list[int],
         logprobs_pred: torch.Tensor,
         masking_rate: float = 0.0,
         mask: int = 50308,
@@ -285,20 +286,21 @@ def calc_tok_pos_speculative(
     input_ids = input_ids.unsqueeze(0)
     input_len = input_ids.shape[1]
     
-    completion_ids = encoder.encode_ordinary(completion)
-    completion_ids = torch.tensor(completion_ids, device="cuda", dtype=torch.int)
-
-    logits: torch.Tensor = net(torch.cat([input_ids, completion_ids], dim=1))
-    causal_pred_ids = logits.argmax(dim=-1).squeeze()
+    gen_toks = torch.tensor(gen_toks, device="cuda", dtype=torch.int)
+    logits: torch.Tensor = net(torch.cat([input_ids, gen_toks.unsqueeze(0)], dim=1))
+    causal_pred_ids = logits.argmax(dim=-1).squeeze()[input_len : -1]
     
     # input_len : -1 because:
     #   - input_len: we want to cut off the first prediction because it is a prediction made without a mask
     #   - -1: the last prediction doesn't predict text that's in the completion; we want to check against the completion -> cut it off
-    logits = logits[input_len : -1]
+    logits = logits[:, input_len : -1]
     logprobs = F.softmax(logits, dim=-1).log()
-    assert logprobs.shape[-1] == logprobs_pred.shape[-1] - 1  # the first prediction isn't cut off in logprobs_pred
 
-    logprobs_pred = logprobs_pred[1:]
+    if logprobs_pred.shape[0] > logprobs.shape[1]:
+        logprobs_pred = logprobs_pred[:logprobs.shape[1]]
+    logprobs_pred = logprobs_pred.unsqueeze(0)
+    
+    assert logprobs.shape[-1] == logprobs_pred.shape[-1]  # the first prediction isn't cut off in logprobs_pred
 
     # Check the how-many'th causal token each masked token is
     tok_positions = logprobs_pred.argsort(dim=-1, descending=True).squeeze()
@@ -420,7 +422,7 @@ def test_free_completion(
         results[sentence] = dict()
         for choose_nth_best in range(1, max_choose_nth_best+1):
             loop.set_description(f"{choose_nth_best=}/{max_choose_nth_best}")
-            completion_c, _, _ = generate(
+            completion_c, gen_toks_c, _, _ = generate(
                 net=net_c,
                 encoder=encoder,
                 query=sentence,
@@ -431,9 +433,9 @@ def test_free_completion(
             )
             size_ratio_completion_c, size_ratio_full_c = calc_ratio_compression(completion_c, sentence+completion_c)
             num_unique_words_c = len(set(completion_c.split()))
-            num_unique_tokens_c = len(set(encoder.encode_ordinary(completion_c)))
+            num_unique_tokens_c = len(set(gen_toks_c))
 
-            completion_r, _, _ = generate(
+            completion_r, gen_toks_r, _, _ = generate(
                 net=net_r,
                 encoder=encoder,
                 query=sentence,
@@ -444,7 +446,7 @@ def test_free_completion(
             )
             size_ratio_completion_r, size_ratio_full_r = calc_ratio_compression(completion_r, sentence+completion_r)
             num_unique_words_r = len(set(completion_r.split()))
-            num_unique_tokens_r = len(set(encoder.encode_ordinary(completion_r)))
+            num_unique_tokens_r = len(set(gen_toks_r))
 
             if num_preference_samples:
                 preferences = calc_preference_stats(  # TODO: calc prefs btw tok numbers (1st vs 2nd most likely token)
@@ -514,7 +516,7 @@ def test_masked_tok_position(
         results[sentence] = dict()
         for choose_nth_best in range(1, max_choose_nth_best+1):
             loop.set_description(f"{choose_nth_best=}/{max_choose_nth_best}")
-            prediction, _, logprobs = generate(
+            _, gen_toks, _, logprobs = generate(
                 net=net,
                 encoder=encoder,
                 query=sentence,
@@ -527,7 +529,7 @@ def test_masked_tok_position(
                 net=net,
                 encoder=encoder,
                 query=sentence,
-                completion=prediction,
+                gen_toks=gen_toks,
                 logprobs_pred=logprobs,
                 masking_rate=masking_rate,
             )
@@ -588,7 +590,7 @@ def test_split_sentences(
                     f"{completion_length=}/{max_completion_len}, "
                     f"{choose_nth_best=}/{max_choose_nth_best}"
                 ) 
-                completion_c, _, logprobs_c = generate(
+                completion_c, gen_toks_c, _, logprobs_c = generate(
                     net=net_c,
                     encoder=encoder,
                     query=partial_sentence,
@@ -597,7 +599,7 @@ def test_split_sentences(
                     masking_rate=masking_rate,
                     stepsize=stepsize,
                 )
-                completion_r, _, logprobs_r = generate(
+                completion_r, gen_toks_r, _, logprobs_r = generate(
                     net=net_r,
                     encoder=encoder,
                     query=partial_sentence,
