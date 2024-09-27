@@ -538,6 +538,7 @@ def test_masked_tok_position(
             results[sentence][f"median_pos{choose_nth_best}"] = torch.tensor(how_manyth).float().median().item()
             results[sentence][f"max_pos{choose_nth_best}"] = torch.tensor(how_manyth).float().max().item()
             results[sentence][f"min_pos{choose_nth_best}"] = torch.tensor(how_manyth).float().min().item()
+            results[sentence][f"std_pos{choose_nth_best}"] = torch.tensor(how_manyth).float().std().item()
 
             if verbosity > 1:
                 print(
@@ -553,6 +554,7 @@ def test_masked_tok_position(
                 f"median_pos_{choose_nth_best}": torch.tensor([results[sentence][f"median_pos{choose_nth_best}"] for sentence in results]).float().median().item(),
                 f"max_pos_{choose_nth_best}": torch.tensor([results[sentence][f"max_pos{choose_nth_best}"] for sentence in results]).float().max().item(),
                 f"min_pos_{choose_nth_best}": torch.tensor([results[sentence][f"min_pos{choose_nth_best}"] for sentence in results]).float().min().item(),
+                f"std_pos_{choose_nth_best}": torch.tensor([results[sentence][f"std_pos{choose_nth_best}"] for sentence in results]).float().std().item(),
             }
         )
     
