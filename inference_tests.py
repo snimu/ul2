@@ -239,6 +239,7 @@ def generate(
     # Generate the output tokens
     output_str = []
     all_ids = input_ids
+    gen_logits = []
     # Compare to encoded tokens of text because some of them get merged & I want to be able to compare to some target text (which also consists of merged tokens)
     while len(encoder.encode_ordinary("".join(output_str))) < min_gen_tokens:
         if stepsize == 1:
@@ -253,18 +254,21 @@ def generate(
             )
 
         logits: torch.Tensor = net(inf_ids)
-        output_ids = logits[:, -stepsize:, :50304].topk(choose_nth_best, dim=-1).indices[:, -1].squeeze().tolist()  # ignore last token position, only decode valid token indices ( up to50304)
+        gen_logits.append(logits[:, -stepsize:, :50304])
+        output_ids = logits[:, -stepsize:, :50304].topk(choose_nth_best, dim=-1).indices[:, :, -1].squeeze().tolist()  # ignore last token position, only decode valid token indices ( up to50304)
         output_ids = output_ids if isinstance(output_ids, list) else [output_ids]
         chars = encoder.decode(output_ids)
         output_str.extend(chars)
         all_ids = torch.cat([all_ids, torch.tensor(output_ids, device="cuda", dtype=torch.int).unsqueeze(0)], dim=1)
 
     # Get the logprops
-    logprobs = F.softmax(net(all_ids), dim=-1).log()
+    output_logprobs = F.softmax(torch.cat(gen_logits, dim=1), dim=-1).log()
+    input_logprobs = F.softmax(net(input_ids)[:, :, :50304], dim=-1).log()
+    all_logprobs = torch.cat([input_logprobs, output_logprobs], dim=1)
     
     # Get the output text
     output_text = "".join(output_str)
-    return output_text, all_ids[:, input_len:].tolist(), logprobs, logprobs.squeeze()[input_len:]
+    return output_text, all_ids[:, input_len:].tolist(), all_logprobs, output_logprobs.squeeze()
 
 
 @torch.no_grad()
@@ -286,21 +290,19 @@ def calc_tok_pos_speculative(
     input_ids = input_ids.unsqueeze(0)
     input_len = input_ids.shape[1]
     
-    gen_toks = torch.tensor(gen_toks, device="cuda", dtype=torch.int)
-    logits: torch.Tensor = net(torch.cat([input_ids, gen_toks], dim=1))
-    causal_pred_ids = logits.argmax(dim=-1).squeeze()[input_len : -1]
-    
     # input_len : -1 because:
     #   - input_len: we want to cut off the first prediction because it is a prediction made without a mask
     #   - -1: the last prediction doesn't predict text that's in the completion; we want to check against the completion -> cut it off
-    logits = logits[:, input_len : -1]
+    gen_toks = torch.tensor(gen_toks, device="cuda", dtype=torch.int)
+    logits: torch.Tensor = net(torch.cat([input_ids, gen_toks], dim=1))[:, input_len : -1, :50304]
+    causal_pred_ids = logits.argmax(dim=-1).squeeze()
     logprobs = F.softmax(logits, dim=-1).log()
 
     if logprobs_pred.shape[0] > logprobs.shape[1]:
         logprobs_pred = logprobs_pred[:logprobs.shape[1]]
     logprobs_pred = logprobs_pred.unsqueeze(0)
     
-    assert logprobs.shape[-1] == logprobs_pred.shape[-1]  # the first prediction isn't cut off in logprobs_pred
+    assert logprobs.shape[-1] == logprobs_pred.shape[-1]
 
     # Check the how-many'th causal token each masked token is
     tok_positions = logprobs_pred.argsort(dim=-1, descending=True).squeeze()
@@ -308,7 +310,7 @@ def calc_tok_pos_speculative(
 
     how_manyth = []
     for tok_pos, pred_id in zip(tok_positions, causal_pred_ids, strict=True):
-        how_manyth.append(tok_pos[torch.where(tok_pos == pred_id.item())].item())
+        how_manyth.append(torch.where(tok_pos == pred_id.item())[0].item())
 
     return how_manyth
 
