@@ -268,7 +268,7 @@ def generate(
     
     # Get the output text
     output_text = "".join(output_str)
-    return output_text, all_ids[:, input_len:].tolist(), all_logprobs, output_logprobs.squeeze()
+    return output_text, all_ids[:, input_len:].squeeze().tolist(), all_logprobs, output_logprobs.squeeze()
 
 
 @torch.no_grad()
