@@ -535,6 +535,7 @@ def test_masked_tok_position(
             )
             results[sentence][f"how_manyth{choose_nth_best}"] = how_manyth
             results[sentence][f"mean_pos{choose_nth_best}"] = torch.tensor(how_manyth).float().mean().item()
+            results[sentence][f"median_pos{choose_nth_best}"] = torch.tensor(how_manyth).float().median().item()
             results[sentence][f"max_pos{choose_nth_best}"] = torch.tensor(how_manyth).float().max().item()
             results[sentence][f"min_pos{choose_nth_best}"] = torch.tensor(how_manyth).float().min().item()
 
@@ -549,6 +550,7 @@ def test_masked_tok_position(
         summary.update(
             {
                 f"mean_pos_{choose_nth_best}": torch.tensor([results[sentence][f"mean_pos{choose_nth_best}"] for sentence in results]).float().mean().item(),
+                f"median_pos_{choose_nth_best}": torch.tensor([results[sentence][f"median_pos{choose_nth_best}"] for sentence in results]).float().median().item(),
                 f"max_pos_{choose_nth_best}": torch.tensor([results[sentence][f"max_pos{choose_nth_best}"] for sentence in results]).float().max().item(),
                 f"min_pos_{choose_nth_best}": torch.tensor([results[sentence][f"min_pos{choose_nth_best}"] for sentence in results]).float().min().item(),
             }
