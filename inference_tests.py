@@ -287,7 +287,7 @@ def calc_tok_pos_speculative(
     input_len = input_ids.shape[1]
     
     gen_toks = torch.tensor(gen_toks, device="cuda", dtype=torch.int)
-    logits: torch.Tensor = net(torch.cat([input_ids, gen_toks.unsqueeze(0)], dim=1))
+    logits: torch.Tensor = net(torch.cat([input_ids, gen_toks], dim=1))
     causal_pred_ids = logits.argmax(dim=-1).squeeze()[input_len : -1]
     
     # input_len : -1 because:
