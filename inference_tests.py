@@ -720,8 +720,8 @@ def main():
         model_name_c = "snimu/causal-ul2-C-fineweb10BT-240M-16heads-lr090"
         model_name_r = "snimu/causal-ul2-R-fineweb10BT-240M-16heads-lr090"
     elif args.model_size == 1300:
-        model_name_c = "snimu/causal-ul2-C-wikitext-1300M-1head-lr100"
-        model_name_r = "snimu/causal-ul2-RX-wikitext-1300M-1head-lr100"
+        model_name_c = "snimu/causal-ul2-C-fineweb10BT-1300M-32heads-lr090"
+        model_name_r = "snimu/causal-ul2-R-fineweb10BT-1300M-32heads-lr090"
 
     net_rand = make_net_from_name(model_name_c).to("cpu")
     net_c = make_net_from_name(model_name_c).to("cpu")
