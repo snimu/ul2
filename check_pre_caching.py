@@ -116,14 +116,13 @@ def train_probes(
     for step in range(num_steps):
         inputs, targets = get_xy(batchsize, max_sequence_length, num_tokens_predicted)
 
-        attn_mask = model.make_mask(inputs, "causal")
         with torch.no_grad():
             x = model.net_dict['embedding'](inputs)
         for module_name, module in model.named_modules():
             if not isinstance(module, LatentAttentionBlock):
                 continue
             with torch.no_grad():
-                x = module(x, attn_mask)
+                x = module(x)
                 preds = model.net_dict['norm'](x)
             for i in range(1, num_tokens_predicted+1):
                 inp = preds[:, :-i]
@@ -161,13 +160,12 @@ def eval_probes(
         # Do the forward pass step by step.
         inputs, targets = get_xy(batchsize=batchsize, length=hyp['misc']['sequence_length']['max'], num_tokens_predicted=num_tokens_predicted)
 
-        attn_mask = model.make_mask(inputs, "causal")
         x = model.net_dict['embedding'](inputs)
 
         for module_name, module in model.named_modules():
             if not isinstance(module, LatentAttentionBlock):
                 continue
-            x = module(x, attn_mask)
+            x = module(x)
             x = model.net_dict['norm'](x)
             for i in range(1, num_tokens_predicted+1):
                 inp = x[:, :-i]
