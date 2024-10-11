@@ -3,14 +3,15 @@
 import argparse
 from dataclasses import dataclass
 from typing import Literal
+from pathlib import Path
 
 import torch
 from torch import nn
 import safetensors.torch
 import polars as pl
+from huggingface_hub import hf_hub_download
 
-from main import SpeedyLangNet, LatentAttentionBlock, max_sequence_length, get_batch, hyp, data
-from inference_tests import make_net_from_name, download_model
+from main import SpeedyLangNet, LatentAttentionBlock, max_sequence_length, get_batch, hyp, data, make_net
 
 
 hyp = hyp
@@ -66,6 +67,42 @@ def get_model_name(millions_of_params: int, mode: Literal["R", "C"]) -> str:
     return model_name
 
 
+def get_depth_width(name: str) -> tuple[int, int]:
+    if "46M" in name:
+        depth, width =  8, 384
+    elif "240M" in name:
+        depth, width = 21, 1024
+    elif "773M" in name:
+        depth, width = 35, 1664
+    elif "1300M" in name:
+        depth, width = 43, 2048
+    else:
+        raise ValueError(f"Unknown pretrained model {name}")
+    return depth, width
+
+
+def make_net_from_name(name: str) -> SpeedyLangNet:
+    depth, width = get_depth_width(name)
+    num_heads = int(name.split("-")[-2].split("head")[0])
+    
+    return make_net({
+        'depth': depth,
+        'width': width,
+        'linear_value': False,
+        'num_heads': num_heads,
+    })
+
+
+def download_model(pretrained: str, cache_dir: str = ".") -> str:
+    hf_hub_download(repo_id=pretrained, filename="model.safetensors", cache_dir=cache_dir)
+    # Find model.safetensors in cache_dir (is in some subfolder)
+    model_path = Path(cache_dir) / f"models--snimu--{pretrained.split('/')[1]}"
+    model_path = list(model_path.glob("**/model.safetensors"))
+    assert len(model_path) == 1, f"Expected exactly one model.safetensors file in cache_dir, got {model_path}"
+    model_path = model_path[0]
+    return str(model_path)
+
+
 def load_model(millions_of_params: int, mode: Literal["R", "C"]) -> SpeedyLangNet:
     model_name = get_model_name(millions_of_params, mode)
     net = make_net_from_name(model_name)
@@ -80,8 +117,14 @@ class Probe:
     optimizer: torch.optim.AdamW
 
 
-def make_probes(model: SpeedyLangNet, num_tokens_predicted: int) -> dict[int, list[Probe]]:
+def make_probes(
+        model: SpeedyLangNet, 
+        model_name: str,
+        num_tokens_predicted: int,
+) -> dict[int, list[Probe]]:
     global metadata
+    _, width = get_depth_width(model_name)
+    total_num_tokens = 50310
     probes = {}
     for module_name, module in model.named_modules():
         if not isinstance(module, LatentAttentionBlock):
@@ -90,8 +133,8 @@ def make_probes(model: SpeedyLangNet, num_tokens_predicted: int) -> dict[int, li
         probes[module_name] = []
         for _ in range(num_tokens_predicted):
             probe = nn.Linear(
-                in_features=metadata["width"],
-                out_features=metadata["num_tokens"],
+                in_features=width,
+                out_features=total_num_tokens,
                 bias=False,
                 device="cuda",
                 dtype=torch.bfloat16,
@@ -119,6 +162,7 @@ def train_probes(
     loss_fn = nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
     for step in range(num_steps):
         inputs, targets = get_xy(batchsize, max_sequence_length, num_tokens_predicted)
+        attn_mask = model.make_mask(inputs, "causal")
 
         with torch.no_grad():
             x = model.net_dict['embedding'](inputs)
@@ -126,7 +170,7 @@ def train_probes(
             if not isinstance(module, LatentAttentionBlock):
                 continue
             with torch.no_grad():
-                x = module(x)
+                x = module(x, attn_mask)
                 preds = model.net_dict['norm'](x)
             for i in range(1, num_tokens_predicted+1):
                 inp = preds[:, :-i]
@@ -151,34 +195,36 @@ def eval_probes(
     num_eval_steps           = num_eval_sequences//batchsize
 
     losses = {
-        a: {t: 0.0 for t in range(num_tokens_predicted)}
-        for a in range(len(model.net_dict['attn_layers'])) 
+        module_name: {t: 0.0 for t in range(num_tokens_predicted)}
+        for module_name, module in model.named_modules()
+        if isinstance(module, LatentAttentionBlock) 
     }
     accs = {
-        a: {t: 0.0 for t in range(num_tokens_predicted)}
-        for a in range(len(model.net_dict['attn_layers'])) 
+        module_name: {t: 0.0 for t in range(num_tokens_predicted)}
+        for module_name, module in model.named_modules()
+        if isinstance(module, LatentAttentionBlock)
     }
     loss_fn = nn.CrossEntropyLoss(reduction="mean", ignore_index=-1)
 
     for _ in range(num_eval_steps):
         # Do the forward pass step by step.
         inputs, targets = get_xy(batchsize=batchsize, length=hyp['misc']['sequence_length']['max'], num_tokens_predicted=num_tokens_predicted)
-
+        attn_mask = model.make_mask(inputs, "causal")
         x = model.net_dict['embedding'](inputs)
 
         for module_name, module in model.named_modules():
             if not isinstance(module, LatentAttentionBlock):
                 continue
-            x = module(x)
+            x = module(x, attn_mask)
             x = model.net_dict['norm'](x)
             for i in range(1, num_tokens_predicted+1):
                 inp = x[:, :-i]
-                outp = targets[:, :-i]
+                target = targets[:, :-i]
                 probe = probes[module_name][-i]
                 preds = probe.probe(inp)
-                loss = loss_fn(preds.flatten(0, 1).float(), outp.flatten(0, 1)).item()
+                loss = loss_fn(preds.flatten(0, 1).float(), target.flatten(0, 1)).item()
                 losses[module_name][i-1] += 1./num_eval_steps * loss
-                acc = (preds.argmax(-1) == targets).float().mean()
+                acc = (preds.argmax(-1).squeeze() == target).float().mean()
                 accs[module_name][i-1] += 1./num_eval_steps * acc
                 targets = targets.roll(-1, dims=1)
 
@@ -203,14 +249,16 @@ def eval_probes(
 
 def main():
     args = get_args()
+    if args.verbose:
+        print(f"\nWorking on {get_model_name(args.millions_of_params, args.mode).split('/')[1]}\n")
     model = load_model(args.millions_of_params, args.mode)
-    probes = make_probes(model, args.num_tokens_predicted)
+    probes = make_probes(model, get_model_name(args.millions_of_params, args.mode), args.num_tokens_predicted)
     probes = train_probes(model, 1000, args.batchsize, args.num_tokens_predicted, probes)
     results = eval_probes(model, args.batchsize, args.num_tokens_predicted, probes)
     if args.verbose:
         print(results)
     
-    results.write_csv(f"probes_results{get_model_name(args.millions_of_params, args.mode)}.csv")
+    results.write_csv(f"probes_results{get_model_name(args.millions_of_params, args.mode).split('/')[1]}.csv")
 
 
 if __name__ == "__main__":
