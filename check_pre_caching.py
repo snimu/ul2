@@ -4,6 +4,7 @@ import argparse
 from dataclasses import dataclass
 from typing import Literal
 from pathlib import Path
+from tqdm import tqdm
 
 import torch
 from torch import nn
@@ -36,9 +37,19 @@ def get_args() -> argparse.Namespace:
         help="The number of tokens predicted by the probe. TYPE: int; DEFAULT: 3"
     )
     parser.add_argument(
-        "--batchsize",
+        "--train_batchsize",
         type=int, default=5,
         help="The batch-size. TYPE: int; DEFAULT: 5"
+    )
+    parser.add_argument(
+        "--val_batchsize",
+        type=int, default=5,
+        help="The batch-size. TYPE: int; DEFAULT: 5"
+    )
+    parser.add_argument(
+        "--num_steps",
+        type=int, default=1000,
+        help="The number of steps to train the probes. TYPE: int; DEFAULT: 1000"
     )
     parser.add_argument(
         "--verbose",
@@ -136,7 +147,7 @@ def make_probes(
                 in_features=width,
                 out_features=total_num_tokens,
                 bias=False,
-                device="cuda",
+                device="cpu",
                 dtype=torch.bfloat16,
             )
             optimizer = torch.optim.AdamW(probe.parameters())
@@ -157,10 +168,11 @@ def train_probes(
         batchsize: int, 
         num_tokens_predicted: int, 
         probes: dict[int, list[Probe]],
+        verbose: bool = True,
 ) -> list[Probe]:
     global metadata
     loss_fn = nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
-    for step in range(num_steps):
+    for step in tqdm(range(num_steps), disable=not verbose):
         inputs, targets = get_xy(batchsize, max_sequence_length, num_tokens_predicted)
         attn_mask = model.make_mask(inputs, "causal")
 
@@ -177,9 +189,10 @@ def train_probes(
                 outp = targets[:, :-i]
                 probe = probes[module_name][-i]
                 probe.optimizer.zero_grad()
-                loss = loss_fn(probe.probe(inp).flatten(0, 1), outp.flatten(0, 1))
+                loss = loss_fn(probe.probe.to("cuda")(inp).flatten(0, 1), outp.flatten(0, 1))
                 loss.backward()
                 probe.optimizer.step()
+                probes[module_name][-i].probe = probe.probe.to("cpu")
 
     return probes
 
@@ -221,12 +234,13 @@ def eval_probes(
                 inp = x[:, :-i]
                 target = targets[:, :-i]
                 probe = probes[module_name][-i]
-                preds = probe.probe(inp)
+                preds = probe.probe.to("cuda")(inp)
                 loss = loss_fn(preds.flatten(0, 1).float(), target.flatten(0, 1)).item()
                 losses[module_name][i-1] += 1./num_eval_steps * loss
                 acc = (preds.argmax(-1).squeeze() == target).float().mean()
                 accs[module_name][i-1] += 1./num_eval_steps * acc
                 targets = targets.roll(-1, dims=1)
+                probes[module_name][-i].probe = probe.probe.to("cpu")
 
     # Flatten the results and turn them into a DataFrame
     results = {
@@ -253,8 +267,8 @@ def main():
         print(f"\nWorking on {get_model_name(args.millions_of_params, args.mode).split('/')[1]}\n")
     model = load_model(args.millions_of_params, args.mode)
     probes = make_probes(model, get_model_name(args.millions_of_params, args.mode), args.num_tokens_predicted)
-    probes = train_probes(model, 1000, args.batchsize, args.num_tokens_predicted, probes)
-    results = eval_probes(model, args.batchsize, args.num_tokens_predicted, probes)
+    probes = train_probes(model, args.num_steps, args.train_batchsize, args.num_tokens_predicted, probes, args.verbose)
+    results = eval_probes(model, args.val_batchsize, args.num_tokens_predicted, probes)
     if args.verbose:
         print(results)
     
