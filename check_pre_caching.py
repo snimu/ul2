@@ -49,7 +49,7 @@ def get_args() -> argparse.Namespace:
     return args
 
 
-def load_model(millions_of_params: int, mode: Literal["R", "C"]) -> SpeedyLangNet:
+def get_model_name(millions_of_params: int, mode: Literal["R", "C"]) -> str:
     match (mode, millions_of_params):
         case ("R", 773):
             model_name = "snimu/causal-ul2-R-fineweb10BT-773M-26heads-lr090"
@@ -63,7 +63,11 @@ def load_model(millions_of_params: int, mode: Literal["R", "C"]) -> SpeedyLangNe
             model_name = "snimu/causal-ul2-C-fineweb10BT-240M-16heads-lr090"
         case ("C", 1300):
             model_name = "snimu/causal-ul2-C-fineweb10BT-1300M-32heads-lr090"
-    
+    return model_name
+
+
+def load_model(millions_of_params: int, mode: Literal["R", "C"]) -> SpeedyLangNet:
+    model_name = get_model_name(millions_of_params, mode)
     net = make_net_from_name(model_name)
     model_path = download_model(model_name)
     safetensors.torch.load_model(net, model_path, device="cuda")
@@ -206,7 +210,7 @@ def main():
     if args.verbose:
         print(results)
     
-    results.write_csv(f"probes_results{args.model_name}.csv")
+    results.write_csv(f"probes_results{get_model_name(args.millions_of_params, args.mode)}.csv")
 
 
 if __name__ == "__main__":
