@@ -1,8 +1,8 @@
 """Check out if the model pre-caches."""
 
 import argparse
-import json
 from dataclasses import dataclass
+from typing import Literal
 
 import torch
 from torch import nn
@@ -10,19 +10,24 @@ import safetensors.torch
 import polars as pl
 
 from main import SpeedyLangNet, LatentAttentionBlock, make_net, get_batch, hyp, data
+from inference_tests import make_net_from_name, download_model
 
 
 hyp = hyp
-metadata = None
 
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--model_file",
-        type=str,
-        help="The .safetensors-file to load. Include fileending. TYPE: str"
+        "--millions_of_params",
+        type=int, default=773, choices=[773, 240, 1300],
+        help="The number of parameters of the model. TYPE: int; DEFAULT: 773"
+    )
+    parser.add_argument(
+        "--mode",
+        type=str, default="R", choices=["R", "C"],
+        help="The mode of the model. TYPE: str; DEFAULT: R"
     )
     parser.add_argument(
         "--num_tokens_predicted",
@@ -44,15 +49,25 @@ def get_args() -> argparse.Namespace:
     return args
 
 
-def load_model(model_file: str) -> SpeedyLangNet:
-    global metadata
-    with open(model_file.split(".safetensors")[0]+".metadata.json", "r") as f:
-        metadata = json.loads(f.read())
-        for key, value in metadata.items():
-            metadata[key] = bool(value) if key == "linear_value" else int(value)
-    model = make_net(metadata)
-    safetensors.torch.load_model(model, model_file)
-    return model.to("cuda")
+def load_model(millions_of_params: int, mode: Literal["R", "C"]) -> SpeedyLangNet:
+    match (mode, millions_of_params):
+        case ("R", 773):
+            model_name = "snimu/causal-ul2-R-fineweb10BT-773M-26heads-lr090"
+        case ("R", 240):
+            model_name = "snimu/causal-ul2-R-fineweb10BT-240M-16heads-lr090"
+        case ("R", 1300):
+            model_name = "snimu/causal-ul2-R-fineweb10BT-1300M-32heads-lr090"
+        case ("C", 773):
+            model_name = "snimu/causal-ul2-C-fineweb10BT-773M-26heads-lr090"
+        case ("C", 240):
+            model_name = "snimu/causal-ul2-C-fineweb10BT-240M-16heads-lr090"
+        case ("C", 1300):
+            model_name = "snimu/causal-ul2-C-fineweb10BT-1300M-32heads-lr090"
+    
+    net = make_net_from_name(model_name)
+    model_path = download_model(model_name)
+    safetensors.torch.load_model(net, model_path, device="cuda")
+    return net
 
 
 @dataclass
@@ -64,12 +79,11 @@ class Probe:
 def make_probes(model: SpeedyLangNet, num_tokens_predicted: int) -> dict[int, list[Probe]]:
     global metadata
     probes = {}
-    attn_num = 0
-    for module in model.modules():
+    for module_name, module in model.named_modules():
         if not isinstance(module, LatentAttentionBlock):
             continue
         
-        probes[attn_num] = []
+        probes[module_name] = []
         for _ in range(num_tokens_predicted):
             probe = nn.Linear(
                 in_features=metadata["width"],
@@ -79,10 +93,15 @@ def make_probes(model: SpeedyLangNet, num_tokens_predicted: int) -> dict[int, li
                 dtype=torch.bfloat16,
             )
             optimizer = torch.optim.AdamW(probe.parameters())
-            probes[attn_num].append(Probe(probe=probe, optimizer=optimizer))
-        attn_num += 1
+            probes[module_name].append(Probe(probe=probe, optimizer=optimizer))
 
     return probes
+
+
+def get_xy(batchsize: int, length: int, num_tokens_predicted: int) -> tuple[torch.Tensor, torch.Tensor]:
+    sequence = get_batch(data, key='train', batchsize=batchsize, length=length)
+    inputs, targets = sequence[:, :-1], sequence[:, 1:] # reslice to get our input tokens and our shifted-by-1 targets
+    return inputs, targets
 
 
 def train_probes(
@@ -95,24 +114,25 @@ def train_probes(
     global metadata
     loss_fn = nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
     for step in range(num_steps):
-        sequence = get_batch(data, key="train", batchsize=batchsize, length=metadata['max_sequence_length'])
-        inputs = sequence
-        targets = sequence.roll(-1, dims=1)
+        inputs, targets = get_xy(batchsize, metadata['max_sequence_length'], num_tokens_predicted)
 
         attn_mask = model.make_mask(inputs, "causal")
         with torch.no_grad():
             x = model.net_dict['embedding'](inputs)
-        for attn_num, attn_block in enumerate(model.net_dict['attn_layers']):
+        for module_name, module in model.named_modules():
+            if not isinstance(module, LatentAttentionBlock):
+                continue
             with torch.no_grad():
-                x = attn_block(x, attn_mask)
+                x = module(x, attn_mask)
                 preds = model.net_dict['norm'](x)
             for i in range(1, num_tokens_predicted+1):
-                probe = probes[attn_num][i-1]
+                inp = preds[:, :-i]
+                outp = targets[:, :-i]
+                probe = probes[module_name][-i]
                 probe.optimizer.zero_grad()
-                loss = loss_fn(probe.probe(preds).flatten(0, 1), targets.flatten(0, 1))
+                loss = loss_fn(probe.probe(inp).flatten(0, 1), outp.flatten(0, 1))
                 loss.backward()
                 probe.optimizer.step()
-                targets = targets.roll(-1, dims=1)
 
     return probes
 
@@ -139,52 +159,56 @@ def eval_probes(
 
     for _ in range(num_eval_steps):
         # Do the forward pass step by step.
-        sequence = get_batch(data, key='eval', batchsize=batchsize, length=hyp['misc']['sequence_length']['max'])
-        inputs = sequence
-        targets = sequence.roll(-1, dims=1)
+        inputs, targets = get_xy(batchsize=batchsize, length=hyp['misc']['sequence_length']['max'], num_tokens_predicted=num_tokens_predicted)
 
         attn_mask = model.make_mask(inputs, "causal")
         x = model.net_dict['embedding'](inputs)
 
-        for attn_num, attn_block in enumerate(model.net_dict['attn_layers']):
-            x = attn_block(x, attn_mask)
+        for module_name, module in model.named_modules():
+            if not isinstance(module, LatentAttentionBlock):
+                continue
+            x = module(x, attn_mask)
             x = model.net_dict['norm'](x)
             for i in range(1, num_tokens_predicted+1):
-                probe = probes[attn_num][i-1]
-                preds = probe.probe(x)
-                loss = loss_fn(preds.flatten(0, 1).float(), targets.flatten(0, 1)).item()
-                losses[attn_num][i-1] += 1./num_eval_steps * loss
+                inp = x[:, :-i]
+                outp = targets[:, :-i]
+                probe = probes[module_name][-i]
+                preds = probe.probe(inp)
+                loss = loss_fn(preds.flatten(0, 1).float(), outp.flatten(0, 1)).item()
+                losses[module_name][i-1] += 1./num_eval_steps * loss
                 acc = (preds.argmax(-1) == targets).float().mean()
-                accs[attn_num][i-1] += 1./num_eval_steps * acc
+                accs[module_name][i-1] += 1./num_eval_steps * acc
                 targets = targets.roll(-1, dims=1)
 
     # Flatten the results and turn them into a DataFrame
     results = {
-        "attn_num": [],
+        "module_name": [],
         "token_num": [],
         "loss": [],
         "accuracy": []
     }
-    for attn_num in range(len(model.net_dict['attn_layers'])):
+    for module_name, module in model.named_modules():
+        if not isinstance(module, LatentAttentionBlock):
+            continue
         for token_num in range(num_tokens_predicted):
-            results["attn_num"].append(attn_num)
-            results["token_num"].append(token_num)
-            results["loss"].append(losses[attn_num][token_num])
-            results["accuracy"].append(accs[attn_num][token_num])
+            results["module_name"].append(module_name)
+            results["token_num"].append(token_num+1)
+            results["loss"].append(losses[module_name][token_num])
+            results["accuracy"].append(accs[module_name][token_num])
 
     return pl.DataFrame(results)
 
 
 def main():
     args = get_args()
-    model = load_model(args.model_file)
+    model = load_model(args.millions_of_params, args.mode)
     probes = make_probes(model, args.num_tokens_predicted)
     probes = train_probes(model, 1000, args.batchsize, args.num_tokens_predicted, probes)
     results = eval_probes(model, args.batchsize, args.num_tokens_predicted, probes)
     if args.verbose:
         print(results)
     
-    results.write_csv(f"probes_results{args.model_file[:-len('.safetensors')]}.csv")
+    results.write_csv(f"probes_results{args.model_name}.csv")
 
 
 if __name__ == "__main__":
