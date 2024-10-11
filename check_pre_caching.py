@@ -9,7 +9,7 @@ from torch import nn
 import safetensors.torch
 import polars as pl
 
-from main import SpeedyLangNet, LatentAttentionBlock, make_net, get_batch, hyp, data
+from main import SpeedyLangNet, LatentAttentionBlock, max_sequence_length, get_batch, hyp, data
 from inference_tests import make_net_from_name, download_model
 
 
@@ -114,7 +114,7 @@ def train_probes(
     global metadata
     loss_fn = nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
     for step in range(num_steps):
-        inputs, targets = get_xy(batchsize, metadata['max_sequence_length'], num_tokens_predicted)
+        inputs, targets = get_xy(batchsize, max_sequence_length, num_tokens_predicted)
 
         attn_mask = model.make_mask(inputs, "causal")
         with torch.no_grad():
