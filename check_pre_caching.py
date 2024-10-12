@@ -173,31 +173,32 @@ def train_probes(
     global metadata
     loss_fn = nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
     for step in tqdm(range(num_steps), disable=not verbose):
-        inputs, targets = get_xy(batchsize, max_sequence_length, num_tokens_predicted)
-        attn_mask = model.make_mask(inputs, "causal")
+        sequence = get_batch(data, key='train', batchsize=batchsize, length=max_sequence_length)
 
         with torch.no_grad():
-            x = model.net_dict['embedding'](inputs)
+            x = model.net_dict['embedding'](sequence)
         for module_name, module in model.named_modules():
             if not isinstance(module, LatentAttentionBlock):
                 continue
             with torch.no_grad():
+                attn_mask = model.make_mask(sequence, "causal")
                 x = module(x, attn_mask)
                 preds = model.net_dict['norm'](x)
+
+            inputs, targets = preds[:, :-1], sequence[:, 1:]  # shift the inputs and targets by one
             for i in range(1, num_tokens_predicted+1):
-                inp = preds[:, :-i]
-                outp = targets[:, :-i]
                 probe = probes[module_name][-i]
                 probe.optimizer.zero_grad()
-                loss = loss_fn(probe.probe.to("cuda")(inp).flatten(0, 1), outp.flatten(0, 1))
+                loss = loss_fn(probe.probe.to("cuda")(inputs).flatten(0, 1), targets.flatten(0, 1))
                 loss.backward()
                 probe.optimizer.step()
                 probes[module_name][-i].probe = probe.probe.to("cpu")
+                inputs, targets = inputs[:, :-1], targets[:, 1:]  # shift the inputs and targets by one
 
     return probes
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def eval_probes(
         model: SpeedyLangNet,
         batchsize: int,
@@ -219,28 +220,28 @@ def eval_probes(
     }
     loss_fn = nn.CrossEntropyLoss(reduction="mean", ignore_index=-1)
 
+    sequence = get_batch(data, key='eval', batchsize=batchsize, length=max_sequence_length)
+    attn_mask = model.make_mask(sequence, "causal")
     for _ in range(num_eval_steps):
         # Do the forward pass step by step.
-        inputs, targets = get_xy(batchsize=batchsize, length=hyp['misc']['sequence_length']['max'], num_tokens_predicted=num_tokens_predicted)
-        attn_mask = model.make_mask(inputs, "causal")
-        x = model.net_dict['embedding'](inputs)
+        x = model.net_dict['embedding'](sequence)
 
         for module_name, module in model.named_modules():
             if not isinstance(module, LatentAttentionBlock):
                 continue
             x = module(x, attn_mask)
             x = model.net_dict['norm'](x)
+
+            inputs, targets = x[:, :-1], sequence[:, 1:]  # shift the inputs and targets by one
             for i in range(1, num_tokens_predicted+1):
-                inp = x[:, :-i]
-                target = targets[:, :-i]
                 probe = probes[module_name][-i]
-                preds = probe.probe.to("cuda")(inp)
-                loss = loss_fn(preds.flatten(0, 1).float(), target.flatten(0, 1)).item()
+                preds = probe.probe.to("cuda")(inputs)
+                loss = loss_fn(preds.flatten(0, 1).float(), targets.flatten(0, 1)).item()
                 losses[module_name][i-1] += 1./num_eval_steps * loss
-                acc = (preds.argmax(-1).squeeze() == target).float().mean()
+                acc = (preds.argmax(-1).squeeze() == targets).float().mean()
                 accs[module_name][i-1] += 1./num_eval_steps * acc
-                targets = targets.roll(-1, dims=1)
                 probes[module_name][-i].probe = probe.probe.to("cpu")
+                inputs, targets = inputs[:, :-1], targets[:, 1:]  # shift the inputs and targets by one
 
     # Flatten the results and turn them into a DataFrame
     results = {
