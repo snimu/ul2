@@ -1,9 +1,11 @@
 
 import ast
+import os
 from typing import Literal
 
 import colorsys
 import matplotlib.pyplot as plt
+import seaborn as sns
 import polars as pl
 import numpy as np
 from rich import print
@@ -52,6 +54,12 @@ def format_num_params(num_params: int, round_to_digits: int = 1) -> str:
     after_dot = "." + after_dot if after_dot else ""
 
     return f"{before_dot}{after_dot}{scalar}"
+
+
+def running_average(tensor: np.ndarray, window_size: int) -> np.ndarray:
+    kernel = np.ones(window_size) / window_size
+    output = np.convolve(tensor, kernel, mode='same')
+    return output
 
 
 def load_xs_ys_avg_y(
@@ -301,6 +309,7 @@ def plot_metric_curves(
         show: bool = True,
         loglog: bool = False,
         plot_all: bool = False,
+        steps_for_smoothing: int = 1,
 ) -> None:
     
     settings = get_unique_settings(
@@ -351,6 +360,10 @@ def plot_metric_curves(
             to_plot=to_plot,
             plot_over=plot_over,
         )
+        if steps_for_smoothing > 1:
+            ys = np.array([running_average(y, steps_for_smoothing)[steps_for_smoothing:-steps_for_smoothing] for y in ys])
+            avg_ys = running_average(avg_ys, steps_for_smoothing)[steps_for_smoothing:-steps_for_smoothing]
+            xs = xs[steps_for_smoothing:-steps_for_smoothing]
         if plot_all:
             for y in ys:
                 if loglog:
@@ -378,23 +391,28 @@ def plot_metric_curves(
         ).collect()["num_params"][0]
         
         if ul2_:
-            label = f"UL2; C-S-R-X-div: {causal_divider_}-{s_divider_}-{r_divider_}-{x_divider_}"
-            if not causal_denoisers_:
-                label += ", nonC dens"
-            if noncausal_masking_:
-                label += ", nonC mask"
-            if randomize_denoiser_settings_:
-                label += ", rand den sets"
-            if randomize_mask_width_:
-                label += ", rand w"
-            if no_special_tokens_:
-                label += ", no tok"
-            if alternate_denoisers_:
-                label += ", alternate dens"
-            if progressive_tasks_:
-                label += ", prog"
+            # cd = int(causal_divider_) if not causal_divider_%1 else causal_divider_
+            # sd = int(s_divider_) if not s_divider_%1 else s_divider_
+            # rd = int(r_divider_) if not r_divider_%1 else r_divider_
+            # xd = int(x_divider_) if not x_divider_%1 else x_divider_
+            # label = f"UL2; C-S-R-X-div: {cd}-{sd}-{rd}-{xd}"
+            # if not causal_denoisers_:
+            #     label += ", nonC dens"
+            # if noncausal_masking_:
+            #     label += ", nonC mask"
+            # if randomize_denoiser_settings_:
+            #     label += ", rand den sets"
+            # if randomize_mask_width_:
+            #     label += ", rand w"
+            # if no_special_tokens_:
+            #     label += ", no tok"
+            # if alternate_denoisers_:
+            #     label += ", alternate dens"
+            # if progressive_tasks_:
+            #     label += ", prog"
+            label = "(causal) [X]+[R]-denoising"
         else:
-            label = "standard training"
+            label = "(purely) causal prediction"
         if loglog:
             plt.loglog(xs, avg_ys, color=color if plot_all else None, label=label)
         else:
@@ -414,7 +432,7 @@ def plot_metric_curves(
         plt.show()
     else:
         # You should probably adjust the filename
-        plt.savefig(f"{to_plot}_vs_{plot_over}.png", dpi=300)
+        plt.savefig(f"{to_plot}_vs_{plot_over}_width{width_}.png", dpi=300)
     close_plt()  # in case you call this function multiple times with different settings
 
 
@@ -594,48 +612,333 @@ def count_mean_of_n_best_values(
     print(table, "\n\n")
 
 
+def plot_for_paper():
+    file = "results/results_seven.csv"
+    depths = pl.scan_csv(file).select("depth").collect()["depth"].unique().to_numpy()
+    fig = plt.figure(figsize=(12, 7))
+    
+    # Increase the font size
+    plt.rcParams.update({'font.size': 16})
+    for depth in depths:
+        num_params = pl.scan_csv(file).filter(
+            (pl.col("depth") == depth)
+        ).collect()["num_params"][0]
+        # First, plot with ul2==False, then with ul2==True
+        xs, ys, avg_ys = load_xs_ys_avg_y(
+            file,
+            depth=depth,
+            width=None,
+            num_heads=1,
+            linear_value=False,
+            ul2=False,
+            to_plot="val_loss_causal",
+            plot_over="epoch",
+        )
+        plt.plot(xs, avg_ys, label=f"{format_num_params(num_params)} [C]")
+        xs, ys, avg_ys = load_xs_ys_avg_y(
+            file,
+            depth=depth,
+            width=None,
+            num_heads=1,
+            linear_value=False,
+            ul2=True,
+            to_plot="val_loss_causal",
+            plot_over="epoch",
+            causal_denoisers=True,
+            randomize_denoiser_settings=True,
+            randomize_mask_width=True,
+            alternate_denoisers=True,
+            causal_divider=0.0,
+            s_divider=0.0,
+            r_divider=1.0,
+            x_divider=1.0,
+            progressive_tasks=False,
+            no_special_tokens=True,
+            noncausal_masking=False,
+        )
+        plt.plot(xs, avg_ys, label=f"{format_num_params(num_params)} [X]+[R]")
+
+    # set the y-axis limits
+    plt.ylim(2.9, 4.5)
+    plt.xlabel("epoch")
+    plt.ylabel("validation loss")
+    # Legend with 2 entries per row
+    plt.legend(bbox_to_anchor=(0.5, -0.2), loc="upper center", ncol=4, borderaxespad=0)
+    plt.grid()
+    plt.tight_layout()
+    # plt.show()
+    plt.savefig("val_loss_causal_all.png", dpi=300)
+    close_plt()  # in case you call this function multiple times with different settings
+
+
+def plot_heatmap(
+        plot_dict, 
+        to_plot="loss", 
+        title : str = None, 
+        label: str = None, 
+        cmap: str = "YlOrRd",
+):
+    # Convert the dictionary to a DataFrame
+    df = pl.DataFrame(plot_dict).to_pandas()
+    
+    # Pivot the DataFrame to create a 2D matrix suitable for a heatmap
+    pivot_df = df.pivot(index="layer", columns="token_num", values=to_plot)
+    
+    # Create a figure and axis
+    plt.figure(figsize=(12, 8))
+    
+    # Create the heatmap
+    sns.heatmap(
+        pivot_df, annot=True, cmap=cmap, fmt=".2f", 
+        cbar_kws={'label': label or to_plot.capitalize()})
+    
+    # Set the title and labels
+    plt.title(title or f"{to_plot.capitalize()} Heatmap by Layer and Token Number")
+    plt.xlabel("Token Number")
+    plt.ylabel("Layer")
+    
+    # Show the plot
+    plt.show()
+
+
+def make_pre_caching_plot_dict(df: pl.DataFrame) -> dict:
+    module_names = sorted(df["module_name"].unique())
+    token_nums = sorted(df["token_num"].unique())
+    plot_dict = dict(layer=[], token_num=[], loss=[], accuracy=[])
+    for module_name in module_names:
+        for token_num in token_nums:
+            plot_dict["layer"].append(int(module_name.split(".")[-1]))
+            plot_dict["token_num"].append(int(token_num))
+            plot_dict["loss"].append(
+                df.filter(
+                    (pl.col("module_name") == module_name) 
+                    & (pl.col("token_num") == token_num)
+                )["loss"][0]
+            )
+            plot_dict["accuracy"].append(
+                df.filter(
+                    (pl.col("module_name") == module_name) 
+                    & (pl.col("token_num") == token_num)
+                )["accuracy"][0]
+            )
+
+    return plot_dict
+
+
+def plot_pre_caching(
+        model_size: Literal[240, 773, 1300] = 240,
+        mode: Literal["R", "C"] = "R",
+        to_plot: Literal["loss", "accuracy"] = "loss",
+) -> None:
+    path = "results/multitoken/"
+    file = [file for file in os.listdir(path) if f"-{mode}-" in file and f"-{model_size}M-" in file][0]
+    file = os.path.join(path, file)
+
+    df = pl.read_csv(file)
+    plot_dict = make_pre_caching_plot_dict(df)
+    plot_heatmap(plot_dict, to_plot=to_plot)
+
+
+def plot_pre_caching_relative(
+        model_size: Literal[240, 773, 1300] = 240,
+        to_plot: Literal["loss", "accuracy"] = "loss",
+) -> None:
+    path = "results/multitoken/"
+    file_r = [file for file in os.listdir(path) if "-R-" in file and f"-{model_size}M-" in file][0]
+    file_r = os.path.join(path, file_r)
+    df_r = pl.read_csv(file_r)
+    plot_dict_r = make_pre_caching_plot_dict(df_r)
+    plot_df_r = pl.DataFrame(plot_dict_r)
+
+    file_c = [file for file in os.listdir(path) if "-C-" in file and f"-{model_size}M-" in file][0]
+    file_c = os.path.join(path, file_c)
+    df_c = pl.read_csv(file_c)
+    plot_dict_c = make_pre_caching_plot_dict(df_c)
+    plot_df_c = pl.DataFrame(plot_dict_c)
+
+    plot_dict = dict(layer=[], token_num=[], loss=[], accuracy=[])
+    
+    for layer, token_num in zip(plot_df_r["layer"], plot_df_r["token_num"]):
+        plot_dict["layer"].append(layer)
+        plot_dict["token_num"].append(token_num)
+
+        loss_r = plot_df_r.filter((pl.col("layer") == layer) & (pl.col("token_num") == token_num))["loss"].item()
+        loss_c = plot_df_c.filter((pl.col("layer") == layer) & (pl.col("token_num") == token_num))["loss"].item()
+        
+        plot_dict["loss"].append(
+            loss_r / loss_c
+        )
+
+        acc_r = plot_df_r.filter((pl.col("layer") == layer) & (pl.col("token_num") == token_num))["accuracy"].item()
+        acc_c = plot_df_c.filter((pl.col("layer") == layer) & (pl.col("token_num") == token_num))["accuracy"].item()
+        plot_dict["accuracy"].append(
+            acc_r / acc_c
+        )
+
+    plot_heatmap(
+        plot_dict=plot_dict, 
+        to_plot=to_plot, 
+        title=f"{to_plot.capitalize()}: R/C ({format_num_params(model_size*1e6)})",
+        label=f"{to_plot}_r / {to_plot}_c",
+        cmap="viridis",
+    )
+    
+
+
 if __name__ == "__main__":
     results_seven = "results/results_seven.csv"
+    results_eight = "results/results_eight.csv"
     # plot_metric_curves(
     #     file=results_seven,
-    #     depth=35,
+    #     depth=8,
     #     width=None,
-    #     num_heads=None,
+    #     num_heads=1,
     #     linear_value=False,
     #     ul2=None,
     #     causal_denoisers=True,
     #     randomize_denoiser_settings=True,
     #     randomize_mask_width= True,
     #     to_plot="val_loss_causal",
-    #     plot_over="epoch",
+    #     plot_over="token",
     #     x_divider=1.0,
+    #     r_divider=1.0,
+    #     causal_divider=0.0,
+    #     noncausal_masking=False,
     #     show=True,
     #     loglog=False,
     #     plot_all=False,
+    #     steps_for_smoothing=1,
+    #     progressive_tasks=None,
     # )
 
-    for to_plot in (
-            "val_pplx_causal", "val_pplx_s", "val_pplx_r", "val_pplx_x",
-            # "val_loss_causal", "val_loss_s", "val_loss_r", "val_loss_x",
-    ):
-        n = 5
-        count_mean_of_n_best_values(
-            file=results_seven,
-            n=n,
-            best="min",
-            ul2=None,
-            causal_denoisers=None,
-            randomize_denoiser_settings=None,
-            randomize_mask_width=None,
-            alternate_denoisers=True,
-            depth=35, # 21, 35, 43
-            causal_divider=None,
-            s_divider=None,
-            r_divider=None,
-            x_divider=None,
-            from_point=None,
-            to_point=None,
-            to_plot=to_plot,
-            plot_over="epoch",
-            tablefmt="cli",
-        )
+    # for to_plot in (
+    #         "val_pplx_causal", "val_pplx_s", "val_pplx_r", "val_pplx_x",
+    #         # "val_loss_causal", "val_loss_s", "val_loss_r", "val_loss_x",
+    # ):
+    #     n = 5
+    #     count_mean_of_n_best_values(
+    #         file=results_seven,
+    #         n=n,
+    #         best="min",
+    #         ul2=None,
+    #         causal_denoisers=None,
+    #         randomize_denoiser_settings=None,
+    #         randomize_mask_width=None,
+    #         alternate_denoisers=True,
+    #         depth=43, # 3, 8, 21, 35, 43
+    #         causal_divider=None,
+    #         s_divider=None,
+    #         r_divider=None,
+    #         x_divider=None,
+    #         from_point=None,
+    #         to_point=None,
+    #         to_plot=to_plot,
+    #         plot_over="epoch",
+    #         tablefmt="cli",
+    #     )
+
+    # for depth in (3, 8, 21, 35, 43):
+    #     n = 5
+    #     count_mean_of_n_best_values(
+    #         file=results_seven,
+    #         n=n,
+    #         best="min",
+    #         ul2=None,
+    #         causal_denoisers=None,
+    #         alternate_denoisers=None,
+    #         no_special_tokens=None,
+    #         randomize_mask_width=None,
+    #         randomize_denoiser_settings=None,
+    #         noncausal_masking=True,
+    #         depth=depth,
+    #         causal_divider=None,
+    #         s_divider=None,
+    #         r_divider=None,
+    #         x_divider=None,
+    #         from_point=None,
+    #         to_point=4,
+    #         to_plot="val_loss_causal",
+    #         plot_over="epoch",
+    #         tablefmt="cli",
+    #     )
+
+    # for depth in (3, 8, 21, 35, 43):
+    #     plot_metric_curves(
+    #         file=results_seven,
+    #         depth=depth,
+    #         width=None,
+    #         num_heads=1,
+    #         linear_value=False,
+    #         ul2=None,
+    #         to_plot="val_loss_causal",
+    #         plot_over="epoch",
+    #         causal_denoisers=True,
+    #         randomize_denoiser_settings=True,
+    #         randomize_mask_width=True,
+    #         alternate_denoisers=True,
+    #         causal_divider=0.0,
+    #         s_divider=0.0,
+    #         r_divider=1.0,
+    #         x_divider=1.0,
+    #         progressive_tasks=False,
+    #         no_special_tokens=True,
+    #         noncausal_masking=False,
+    #         show=True,
+    #         loglog=False,
+    #         plot_all=False,
+    #         steps_for_smoothing=1,
+    #     )
+
+    # for depth in (3, 8, 21, 35, 43):
+    #     n = 5
+    #     count_mean_of_n_best_values(
+    #         file=results_seven,
+    #         n=n,
+    #         best="min",
+    #         ul2=None,
+    #         causal_denoisers=True,
+    #         randomize_denoiser_settings=True,
+    #         randomize_mask_width=True,
+    #         alternate_denoisers=True,
+    #         depth=depth,
+    #         causal_divider=0.0,
+    #         s_divider=0.0,
+    #         r_divider=1.0,
+    #         x_divider=1.0,
+    #         from_point=None,
+    #         progressive_tasks=False,
+    #         no_special_tokens=True,
+    #         noncausal_masking=False,
+    #         num_heads=1,
+    #         to_point=None,
+    #         to_plot="val_loss_causal",
+    #         plot_over="epoch",
+    #         tablefmt="cli",
+    #     )
+
+    # file = "results/results_eight.csv"
+    # depths = pl.scan_csv(file).select("depth").collect()["depth"].unique().to_numpy()
+    # for depth in depths:
+    #     plot_metric_curves(
+    #         file=file,
+    #         depth=depth,
+    #         width=None,
+    #         num_heads=None,
+    #         linear_value=None,
+    #         ul2=None,
+    #         to_plot="val_loss_causal",
+    #         plot_over="epoch",
+    #         show=True,
+    #         loglog=False,
+    #         plot_all=False,
+    #         steps_for_smoothing=1,
+    #     )
+
+    # plot_for_paper()
+
+    # plot_pre_caching(mode="R")
+    # plot_pre_caching(mode="C")
+    plot_pre_caching_relative(model_size=240, to_plot="loss")
+    plot_pre_caching_relative(model_size=240, to_plot="accuracy")
+    plot_pre_caching_relative(model_size=773, to_plot="loss")
+    plot_pre_caching_relative(model_size=773, to_plot="accuracy")
