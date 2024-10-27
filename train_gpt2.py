@@ -581,10 +581,10 @@ if __name__ == "__main__":
     parser.add_argument("--num_iterations", type=int, default=10, help="number of iterations to run")
     parser.add_argument("--inference_only", type=int, default=0, help="only run inference")
     # optimization
-    parser.add_argument("--learning_rate", type=float, default=1e-4, help="learning rate warmup iterations")
-    parser.add_argument("--warmup_iters", type=int, default=0, help="learning rate warmup iterations")
-    parser.add_argument("--learning_rate_decay_frac", type=float, default=1.0, help="learning rate warmup iterations")
-    parser.add_argument("--weight_decay", type=float, default=0.0, help="weight decay")
+    parser.add_argument("--learning_rate", type=float, default=0.0006, help="learning rate warmup iterations")
+    parser.add_argument("--warmup_iters", type=int, default=700, help="learning rate warmup iterations")
+    parser.add_argument("--learning_rate_decay_frac", type=float, default=0.0, help="learning rate warmup iterations")
+    parser.add_argument("--weight_decay", type=float, default=0.0005, help="weight decay")
     parser.add_argument("--grad_clip", type=float, default=1.0, help="maximum gradient magnitude")
     # evaluation
     parser.add_argument("--val_loss_every", type=int, default=0, help="every how mant steps to evaluate val loss?")
