@@ -23,6 +23,7 @@ import math
 import glob
 import struct
 import inspect
+import random
 from contextlib import nullcontext
 from dataclasses import dataclass
 
@@ -123,7 +124,7 @@ class Block(nn.Module):
 @dataclass
 class GPTConfig:
     block_size: int = 1024
-    vocab_size: int = 50257
+    vocab_size: int = 50258
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
@@ -329,12 +330,56 @@ def _load_data_shard(filename):
     assert len(tokens) == ntok, "number of tokens read does not match header?"
     return tokens
 
+
+@torch.no_grad()
+def _mask_spans(
+        sequence: torch.Tensor,
+        mask_width: int,
+        masking_rate: float,
+        mask_token: int,
+) -> torch.Tensor:
+    assert 0.0 <= masking_rate <= 1.0, "masking_rate must be between 0 and 1"
+
+    mask_width = max(1, min(mask_width, math.floor(masking_rate * sequence.shape[-1])))
+    num_masks = math.floor(masking_rate * sequence.shape[-1] / mask_width)
+
+    batch_size, seq_length = sequence.shape
+    mask = torch.randint(0, seq_length - mask_width + 1, (batch_size, num_masks))
+    
+    # Create a tensor to hold the mask
+    mask_tensor = torch.zeros_like(sequence)
+    
+    # Create a range for the mask width
+    width_range = torch.arange(mask_width).unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, mask_width)
+    
+    # Expand the mask to the desired width
+    mask_positions = mask.unsqueeze(-1) + width_range  # Shape: (batch_size, num_masks, mask_width)
+    
+    # Clip the positions to stay within sequence bounds
+    mask_positions = mask_positions.clamp(0, seq_length - 1)
+    
+    # Scatter the mask positions into the mask tensor
+    mask_tensor.scatter_(1, mask_positions.view(batch_size, -1), 1)
+
+    # Apply the mask to the sequence
+    inputs = sequence.masked_fill(mask_tensor.bool(), mask_token)
+
+    return inputs
+
+
+def _randomize_with_mean(mean: int, clip_min: int = 1, clip_max: int = 15) -> int | float:
+    x = torch.randn(1000) * mean / 4 + mean
+    x = torch.clamp(x, clip_min, clip_max)
+    return int(x.round()[torch.randint(0, 1000, (1,))])
+
+
 class DistributedDataLoader:
-    def __init__(self, filename_pattern, B, T, process_rank, num_processes):
+    def __init__(self, filename_pattern, B, T, process_rank, num_processes, use_mask=False):
         self.process_rank = process_rank
         self.num_processes = num_processes
         self.B = B
         self.T = T
+        self.use_mask = use_mask
 
         # glob files that match the pattern
         self.files = sorted(glob.glob(filename_pattern))
@@ -372,6 +417,10 @@ class DistributedDataLoader:
         buf = self.tokens[self.current_position : self.current_position+B*T+1]
         buf = torch.tensor(buf.astype(np.int32), dtype=torch.long)
         x = (buf[:-1]).view(B, T) # inputs
+        if self.use_mask:
+            mean = random.choice((3, 8))  # R-denoising from UL2
+            mask_width = _randomize_with_mean(mean)  # jitter around mean --> allow arbitrary masking rates
+            x = _mask_spans(x, mask_width=mask_width, masking_rate=0.15, mask_token=50257)
         y = (buf[1:]).view(B, T) # targets
         # advance the start pointer in current shard
         self.current_position += B * T * self.num_processes
@@ -604,6 +653,7 @@ if __name__ == "__main__":
     parser.add_argument("--write_tensors", type=int, default=0, help="write tensors to disk")
     # custom
     parser.add_argument("--wandb_project", type=str, default=None, help="wandb project name")
+    parser.add_argument("--use_mask", action="store_true", help="Use causal R-denoising")
     args = parser.parse_args()
 
     # args error checking and convenience variables
