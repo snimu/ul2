@@ -37,6 +37,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 from torch.distributed.optim import ZeroRedundancyOptimizer
 import torch.distributed as dist
+import safetensors.torch
 
 # -----------------------------------------------------------------------------
 # PyTorch nn.Module definitions for the GPT-2 model
@@ -654,6 +655,7 @@ if __name__ == "__main__":
     # custom
     parser.add_argument("--wandb_project", type=str, default=None, help="wandb project name")
     parser.add_argument("--use_mask", action="store_true", help="Use causal R-denoising")
+    parser.add_argument("--save_model", action="store_true", help="Save model")
     args = parser.parse_args()
 
     # args error checking and convenience variables
@@ -826,6 +828,7 @@ if __name__ == "__main__":
             config={
                 "seed": args.seed,
                 "num_params": num_params,
+                "use_mask": args.use_mask,
             }
         )
 
@@ -862,6 +865,7 @@ if __name__ == "__main__":
                     {
                         "val/loss": val_loss,
                         "val/step": step,
+                        "val/tokens_seen": int(B * T * ddp_world_size * step),
                     }
                 )
 
@@ -954,6 +958,7 @@ if __name__ == "__main__":
                     "train/norm": norm,
                     "train/tokens_per_second": tokens_per_second,
                     "train/step": step,
+                    "train/tokens_seen": int(B * T * ddp_world_size * (step + 1)),
                 }
             )
 
@@ -965,6 +970,14 @@ if __name__ == "__main__":
     timings = timings[-20:]
     print0(f"final {len(timings)} iters avg: {np.mean(timings)*1000:.3f}ms")
     print0(f"peak memory consumption: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB")
+
+    if args.save_model:
+        tokens_seen = int(B * T * ddp_world_size * args.num_iterations)
+        safetensors.torch.save_model(
+            model=model.module if ddp else model,
+            filename=run_name + f"_{tokens_seen}_tokens_seen.safetensors",
+            metadata=model_config.__dict__,
+        )
 
     # -------------------------------------------------------------------------
     # clean up nice
