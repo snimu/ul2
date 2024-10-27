@@ -38,6 +38,7 @@ from torch.distributed import init_process_group, destroy_process_group
 from torch.distributed.optim import ZeroRedundancyOptimizer
 import torch.distributed as dist
 import safetensors.torch
+from huggingface_hub import HfApi, login
 
 # -----------------------------------------------------------------------------
 # PyTorch nn.Module definitions for the GPT-2 model
@@ -656,7 +657,11 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_project", type=str, default=None, help="wandb project name")
     parser.add_argument("--use_mask", action="store_true", help="Use causal R-denoising")
     parser.add_argument("--save_model", action="store_true", help="Save model")
+    parser.add_argument("--hf_repo", type=str, default=None, help="Hugging Face repo name")
     args = parser.parse_args()
+
+    if args.hf_repo is not None:
+        assert os.getenv("HF_API_TOKEN") is not None, "You need to set the HF_API_TOKEN environment variable to upload the model to Hugging Face"
 
     # args error checking and convenience variables
     B, T = args.batch_size, args.sequence_length
@@ -978,7 +983,16 @@ if __name__ == "__main__":
             filename=run_name + f"_{tokens_seen}_tokens_seen.safetensors",
             metadata=model_config.__dict__,
         )
-
+        if args.hf_repo is not None:
+            api = HfApi()
+            login(token=os.getenv("HF_API_TOKEN"))
+            api.create_repo(args.hf_repo, exist_ok=True)
+            api.upload_file(
+                path_or_fileobj=run_name + f"_{tokens_seen}_tokens_seen.safetensors",
+                path_in_repo="model.safetensors",
+                repo_id=args.hf_repo,
+                repo_type="model",
+            )
     # -------------------------------------------------------------------------
     # clean up nice
     if ddp:
