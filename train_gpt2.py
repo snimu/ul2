@@ -587,8 +587,8 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=0.0005, help="weight decay")
     parser.add_argument("--grad_clip", type=float, default=1.0, help="maximum gradient magnitude")
     # evaluation
-    parser.add_argument("--val_loss_every", type=int, default=0, help="every how mant steps to evaluate val loss?")
-    parser.add_argument("--val_max_steps", type=int, default=20, help="how many batches of val to average?")
+    parser.add_argument("--val_loss_every", type=int, default=100, help="every how mant steps to evaluate val loss?")
+    parser.add_argument("--val_max_steps", type=int, default=10, help="how many batches of val to average?")
     parser.add_argument("--sample_every", type=int, default=0, help="how often to sample from the model?")
     # debugging
     parser.add_argument("--overfit_single_batch", type=int, default=1, help="overfit just one batch of data")
