@@ -14,3 +14,4 @@ openai
 instructor
 python-dotenv
 anthropic
+typer
