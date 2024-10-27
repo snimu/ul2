@@ -572,11 +572,11 @@ if __name__ == "__main__":
     parser.add_argument("--input_bin", type=str, default="dev/data/tinyshakespeare/tiny_shakespeare_val.bin", help="input .bin to train on")
     parser.add_argument("--input_val_bin", type=str, default="", help="input .bin to eval validation loss on")
     parser.add_argument("--output_dir", type=str, default="", help="output directory to which to write logs and checkpoints")
-    parser.add_argument("--model", type=str, default="gpt2", help="gpt2|gpt2-medium|gpt2-large|gpt2-xl|d12|d24|d36|d48")
+    parser.add_argument("--model", type=str, default="d12", help="gpt2|gpt2-medium|gpt2-large|gpt2-xl|d12|d24|d36|d48")
     # token layout for each step of the optimization
-    parser.add_argument("--batch_size", type=int, default=4, help="batch size, in units of #batch dimensions")
-    parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
-    parser.add_argument("--total_batch_size", type=int, default=256, help="total desired batch size, in units of #tokens")
+    parser.add_argument("--batch_size", type=int, default=64, help="batch size, in units of #batch dimensions")
+    parser.add_argument("--sequence_length", type=int, default=1024, help="sequence length")
+    parser.add_argument("--total_batch_size", type=int, default=-1, help="total desired batch size, in units of #tokens")
     # workload (number of steps)
     parser.add_argument("--num_iterations", type=int, default=10, help="number of iterations to run")
     parser.add_argument("--inference_only", type=int, default=0, help="only run inference")
@@ -596,12 +596,12 @@ if __name__ == "__main__":
     parser.add_argument("--tensorcores", type=int, default=0, help="use tensorcores")
     # memory management
     parser.add_argument("--device", type=str, default="", help="by default we autodetect, or set it here")
-    parser.add_argument("--compile", type=int, default=0, help="torch.compile the model")
-    parser.add_argument("--flash", type=int, default=0, help="use flash attention")
-    parser.add_argument("--dtype", type=str, default="float32", help="float32|float16|bfloat16")
+    parser.add_argument("--compile", type=int, default=1, help="torch.compile the model")
+    parser.add_argument("--flash", type=int, default=1, help="use flash attention")
+    parser.add_argument("--dtype", type=str, default="bfloat16", help="float32|float16|bfloat16")
     parser.add_argument("--zero_stage", type=int, default=0, help="zero redundancy optimizer stage (0/1/2/3)")
     # python -> C bridge
-    parser.add_argument("--write_tensors", type=int, default=1, help="write tensors to disk")
+    parser.add_argument("--write_tensors", type=int, default=0, help="write tensors to disk")
     # custom
     parser.add_argument("--wandb_project", type=str, default=None, help="wandb project name")
     args = parser.parse_args()
@@ -649,8 +649,8 @@ if __name__ == "__main__":
 
     # calculate gradient accumulation from the desired total batch size and the current run configuration
     tokens_per_fwdbwd = B * T * ddp_world_size
-    assert args.total_batch_size % tokens_per_fwdbwd == 0
-    grad_accum_steps = args.total_batch_size // tokens_per_fwdbwd
+    # assert args.total_batch_size % tokens_per_fwdbwd == 0
+    grad_accum_steps = 1  # args.total_batch_size // tokens_per_fwdbwd
     print0(f"total desired batch size: {args.total_batch_size}")
     print0(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
 
