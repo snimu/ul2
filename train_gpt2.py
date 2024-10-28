@@ -829,6 +829,7 @@ if __name__ == "__main__":
 
     if master_process and args.wandb_project is not None:
         run_name = args.model + "_" + format_num_params(num_params)
+        run_name += "_withMask" if args.use_mask else ""
         run_name += f"_seed.{args.seed}"
         wandb.init(
             name=run_name,
