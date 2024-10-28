@@ -130,6 +130,7 @@ class GPTConfig:
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
+    seed: int = 0
 
 class GPT(nn.Module):
 
@@ -149,7 +150,7 @@ class GPT(nn.Module):
 
         # init all weights, use a torch rng object to be very careful
         self.init_rng = torch.Generator()
-        self.init_rng.manual_seed(42)
+        self.init_rng.manual_seed(config.seed)
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
@@ -658,6 +659,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_mask", action="store_true", help="Use causal R-denoising")
     parser.add_argument("--save_model", action="store_true", help="Save model")
     parser.add_argument("--hf_repo", type=str, default=None, help="Hugging Face repo name")
+    parser.add_argument("--seed", type=int, default=0, help="Seed for RNG")
     args = parser.parse_args()
 
     if args.hf_repo is not None:
@@ -716,9 +718,10 @@ if __name__ == "__main__":
     ctx = torch.amp.autocast(device_type=device_type, dtype=ptdtype) if device_type == "cuda" else nullcontext()
 
     # rng / reproducibility
-    torch.manual_seed(42)
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed(42)
+        torch.cuda.manual_seed(args.seed)
 
     # set the torch precision mode to use TensorFloat32 (TF32) for matmuls
     # docs https://pytorch.org/docs/stable/generated/torch.set_float32_matmul_precision.html
