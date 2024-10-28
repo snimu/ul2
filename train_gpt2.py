@@ -641,7 +641,7 @@ if __name__ == "__main__":
     # evaluation
     parser.add_argument("--val_loss_every", type=int, default=100, help="every how mant steps to evaluate val loss?")
     parser.add_argument("--val_max_steps", type=int, default=10, help="how many batches of val to average?")
-    parser.add_argument("--sample_every", type=int, default=0, help="how often to sample from the model?")
+    parser.add_argument("--sample_every", type=int, default=1000, help="how often to sample from the model?")
     # debugging
     parser.add_argument("--overfit_single_batch", type=int, default=1, help="overfit just one batch of data")
     # numerics
@@ -891,9 +891,12 @@ if __name__ == "__main__":
             temperature = 1.0
             top_k = 40
             yg = raw_model.generate(xg, max_new_tokens, temperature=temperature, top_k=top_k)
+            txt = enc.decode(yg[0].tolist())
             print0('---------------')
-            print0(enc.decode(yg[0].tolist()))
+            print0(txt)
             print0('---------------')
+            if master_process:
+                wandb.log({"sample": [txt], "sample_step": [step]})
 
         # bit confusing: we want to make sure to eval and sample on 0th iteration
         # but also after the very last iteration. so we loop for step <= num_iterations
