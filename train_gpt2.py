@@ -764,10 +764,10 @@ if __name__ == "__main__":
     # Our own version of a simple DistributedDataLoader
 
     # load tokens
-    train_loader = DistributedDataLoader(args.input_bin, B, T, ddp_rank, ddp_world_size)
+    train_loader = DistributedDataLoader(args.input_bin, B, T, ddp_rank, ddp_world_size, use_mask=args.use_mask)
     val_loader = None
     if args.input_val_bin:
-        val_loader = DistributedDataLoader(args.input_val_bin, B, T, ddp_rank, ddp_world_size)
+        val_loader = DistributedDataLoader(args.input_val_bin, B, T, ddp_rank, ddp_world_size)  # val w/o mask
 
     # -------------------------------------------------------------------------
     # PyTorch -> C bridge: save some weights and state for C to load later as reference
