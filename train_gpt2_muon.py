@@ -531,14 +531,14 @@ if __name__ == "__main__":
             f.write(f'{result.stdout}\n')
             f.write('='*100 + '\n')
 
-    if master_process and args.wandb_project is not None:
+    if master_process and cli_args.project is not None:
         num_tokens = int(args.batch_size * args.sequence_length * args.num_iterations)
         run_name = format_num_params(num_params) + "-params" + f"_{num_tokens}-toks"
         run_name += "_withMask" if cli_args.use_mask else ""
         run_name += f"_seed.{cli_args.seed}_{run_id}"
         wandb.init(
             name=run_name,
-            project=args.wandb_project,
+            project=cli_args.wandb_project,
             config={
                 "run_id": run_id,
                 "seed": cli_args.seed,
