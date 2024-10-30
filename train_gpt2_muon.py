@@ -21,6 +21,8 @@ import torch.nn.functional as F
 import torch.distributed as dist
 import torch._inductor.config as config
 from torch.nn.parallel import DistributedDataParallel as DDP
+import safetensors.torch
+from huggingface_hub import HfApi, login
 
 # -----------------------------------------------------------------------------
 # Muon optimizer
@@ -443,6 +445,8 @@ class Hyperparameters:
     n_layer : int = 52
     n_head : int = 12
     n_embd : int = 1536
+    save_every: bool = False
+    hf_repo: str = None
 
 
 if __name__ == "__main__":
@@ -453,6 +457,8 @@ if __name__ == "__main__":
     parser.add_argument("--n_layer", type=int, default=52, help="default: 52")
     parser.add_argument("--n_head", type=int, default=12, help="default: 12")
     parser.add_argument("--n_embd", type=int, default=1536, help="default: 1536")
+    parser.add_argument("--save_every", type=int, default=0, help="default: 0")
+    parser.add_argument("--hf_repo", type=str, default=None, help="default: None")
     cli_args = parser.parse_args()
     args = Hyperparameters()
     args.use_mask = cli_args.use_mask
@@ -461,6 +467,8 @@ if __name__ == "__main__":
     args.n_layer = cli_args.n_layer
     args.n_head = cli_args.n_head
     args.n_embd = cli_args.n_embd
+    args.save_every = cli_args.save_every
+    args.hf_repo = cli_args.hf_repo
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
     assert torch.cuda.is_available()
@@ -472,6 +480,12 @@ if __name__ == "__main__":
     torch.cuda.set_device(device)
     print(f"using device: {device}")
     master_process = (ddp_rank == 0) # this process will do logging, checkpointing etc.
+
+    if master_process and args.hf_repo is not None:
+        assert os.getenv("HF_API_TOKEN") is not None, "You need to set the HF_API_TOKEN environment variable to upload the model to Hugging Face"
+        api = HfApi()
+        login(token=os.getenv("HF_API_TOKEN"))
+        api.create_repo(args.hf_repo, exist_ok=True)
 
     # convenience variables
     B, T = args.device_batch_size, args.sequence_length
@@ -673,10 +687,38 @@ if __name__ == "__main__":
             print(f"step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.0f}ms step_avg:{approx_time/timed_steps:.2f}ms")
             with open(logfile, "a") as f:
                 f.write(f"step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.0f}ms step_avg:{approx_time/timed_steps:.2f}ms\n")
+            if args.save_every > 0 and step % args.save_every == 0:
+                tokens_seen = int(B * T * ddp_world_size * step)
+                safetensors.torch.save_model(
+                    model=model.module,
+                    filename=run_name + f"_{tokens_seen}_tokens_seen_step{step}.safetensors",
+                    metadata=args.__dict__,
+                )
+                if args.hf_repo is not None:
+                    api.upload_file(
+                        path_or_fileobj=run_name + f"_{tokens_seen}_tokens_seen_step{step}.safetensors",
+                        path_in_repo="model.safetensors",
+                        repo_id=args.hf_repo,
+                        repo_type="model",
+                    )
 
     if master_process:
         print(f"peak memory consumption: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB")
 
+    if master_process and args.save_every > 0:  # always save the final model
+        tokens_seen = int(B * T * ddp_world_size * args.num_iterations)
+        safetensors.torch.save_model(
+            model=model.module,
+            filename=run_name + f"_{tokens_seen}_tokens_seen.safetensors",
+            metadata=args.__dict__,
+        )
+        if args.hf_repo is not None:
+            api.upload_file(
+                path_or_fileobj=run_name + f"_{tokens_seen}_tokens_seen.safetensors",
+                path_in_repo="model.safetensors",
+                repo_id=args.hf_repo,
+                repo_type="model",
+            )
     # -------------------------------------------------------------------------
     # clean up nice
     dist.destroy_process_group()
