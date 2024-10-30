@@ -531,7 +531,7 @@ if __name__ == "__main__":
             f.write(f'{result.stdout}\n')
             f.write('='*100 + '\n')
 
-    if master_process and cli_args.project is not None:
+    if master_process and cli_args.wandb_project is not None:
         num_tokens = int(args.batch_size * args.sequence_length * args.num_iterations)
         run_name = format_num_params(num_params) + "-params" + f"_{num_tokens}-toks"
         run_name += "_withMask" if cli_args.use_mask else ""
