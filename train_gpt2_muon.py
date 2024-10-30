@@ -440,8 +440,11 @@ def format_num_params(num_params: int, round_to_digits: int = 1) -> str:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--use_mask", action="store_true")
-    parser.add_argument("--wandb_project", type=str, default=None)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--wandb_project", type=str, default=None, help="default: None")
+    parser.add_argument("--seed", type=int, default=0, help="default: 0")
+    parser.add_argument("--n_layer", type=int, default=52, help="default: 52")
+    parser.add_argument("--n_head", type=int, default=12, help="default: 12")
+    parser.add_argument("--n_embd", type=int, default=1536, help="default: 1536")
     cli_args = parser.parse_args()
     args = Hyperparameters()
 
@@ -476,7 +479,7 @@ if __name__ == "__main__":
     # there are only 50257 unique GPT-2 tokens; we extend to nearest multiple of 128 for efficiency. suggested to me by @Grad62304977.
     # this originates from Karpathy's experiments.
     num_vocab = 50304
-    model = GPT(GPTConfig(vocab_size=num_vocab, n_layer=52, n_head=12, n_embd=1536))
+    model = GPT(GPTConfig(vocab_size=num_vocab, n_layer=cli_args.n_layer, n_head=cli_args.n_head, n_embd=cli_args.n_embd))
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print0(f"number of parameters: {num_params:_} ({format_num_params(num_params)})")
     if master_process:
