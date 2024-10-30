@@ -387,25 +387,6 @@ class DistributedDataLoader:
 # -----------------------------------------------------------------------------
 # int main
 
-@dataclass
-class Hyperparameters:
-    # data hyperparams
-    input_bin : str = 'edu_fineweb100B/edu_fineweb_train*' # input .bin to train on
-    input_val_bin : str = 'edu_fineweb100B/edu_fineweb_val*' # input .bin to eval validation loss on
-    # optimization hyperparams
-    batch_size : int = 8*60 # batch size, in sequences, across all devices
-    device_batch_size : int = 12 # batch size, in sequences, per device
-    sequence_length : int = 1024 # sequence length, in tokens
-    num_iterations : int = 203_450  # 100B tokens # int(0.75*2*10172) # number of iterations to run  # 15_258
-    learning_rate : float = 0.0036 / 2
-    warmup_iters : int = 0
-    warmdown_iters : int = int(0.75*2*2906) # number of iterations of linear warmup/warmdown for triangular or trapezoidal schedule  # 4359s
-    weight_decay : float = 0
-    # evaluation and logging hyperparams
-    val_loss_every : int = 325 # every how many steps to evaluate val loss? 0 for only at the end
-    val_tokens : int = 10420224 # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
-    save_every : int = 0 # every how many steps to save the checkpoint? 0 for only at the end
-
 
 def print0(*args, **kwargs):
     # modified print that only prints from the master process
@@ -437,6 +418,33 @@ def format_num_params(num_params: int, round_to_digits: int = 1) -> str:
     return f"{before_dot}{after_dot}{scalar}"
 
 
+@dataclass
+class Hyperparameters:
+    # data hyperparams
+    input_bin : str = 'edu_fineweb100B/edu_fineweb_train*' # input .bin to train on
+    input_val_bin : str = 'edu_fineweb100B/edu_fineweb_val*' # input .bin to eval validation loss on
+    # optimization hyperparams
+    batch_size : int = 8*60 # batch size, in sequences, across all devices
+    device_batch_size : int = 12 # batch size, in sequences, per device
+    sequence_length : int = 1024 # sequence length, in tokens
+    num_iterations : int = 203_450  # 100B tokens # int(0.75*2*10172) # number of iterations to run  # 15_258
+    learning_rate : float = 0.0036 / 2
+    warmup_iters : int = 0
+    warmdown_iters : int = int(0.75*2*2906) # number of iterations of linear warmup/warmdown for triangular or trapezoidal schedule  # 4359s
+    weight_decay : float = 0
+    # evaluation and logging hyperparams
+    val_loss_every : int = 325 # every how many steps to evaluate val loss? 0 for only at the end
+    val_tokens : int = 10420224 # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
+    save_every : int = 0 # every how many steps to save the checkpoint? 0 for only at the end
+    # cli args
+    use_mask : bool = False
+    wandb_project : str = None
+    seed : int = 0
+    n_layer : int = 52
+    n_head : int = 12
+    n_embd : int = 1536
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--use_mask", action="store_true")
@@ -447,6 +455,12 @@ if __name__ == "__main__":
     parser.add_argument("--n_embd", type=int, default=1536, help="default: 1536")
     cli_args = parser.parse_args()
     args = Hyperparameters()
+    args.use_mask = cli_args.use_mask
+    args.wandb_project = cli_args.wandb_project
+    args.seed = cli_args.seed
+    args.n_layer = cli_args.n_layer
+    args.n_head = cli_args.n_head
+    args.n_embd = cli_args.n_embd
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
     assert torch.cuda.is_available()
@@ -469,7 +483,7 @@ if __name__ == "__main__":
     train_accumulation_steps = args.batch_size // (B * ddp_world_size)
 
     # load tokens
-    train_loader = DistributedDataLoader(args.input_bin, B, T, ddp_rank, ddp_world_size, use_mask=cli_args.use_mask)
+    train_loader = DistributedDataLoader(args.input_bin, B, T, ddp_rank, ddp_world_size, use_mask=args.use_mask)
     val_loader = DistributedDataLoader(args.input_val_bin, B, T, ddp_rank, ddp_world_size)
     if master_process:
         print(f"Training DataLoader: total number of tokens: {train_loader.ntok_total} across {len(train_loader.files)} files")
@@ -479,7 +493,7 @@ if __name__ == "__main__":
     # there are only 50257 unique GPT-2 tokens; we extend to nearest multiple of 128 for efficiency. suggested to me by @Grad62304977.
     # this originates from Karpathy's experiments.
     num_vocab = 50304
-    model = GPT(GPTConfig(vocab_size=num_vocab, n_layer=cli_args.n_layer, n_head=cli_args.n_head, n_embd=cli_args.n_embd))
+    model = GPT(GPTConfig(vocab_size=num_vocab, n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd))
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print0(f"number of parameters: {num_params:_} ({format_num_params(num_params)})")
     if master_process:
@@ -534,20 +548,20 @@ if __name__ == "__main__":
             f.write(f'{result.stdout}\n')
             f.write('='*100 + '\n')
 
-    if master_process and cli_args.wandb_project is not None:
+    if master_process and args.wandb_project is not None:
         num_tokens = int(args.batch_size * args.sequence_length * args.num_iterations)
         run_name = format_num_params(num_params) + "-params" + f"_{num_tokens}-toks"
-        run_name += "_withMask" if cli_args.use_mask else ""
-        run_name += f"_seed.{cli_args.seed}_{run_id}"
+        run_name += "_withMask" if args.use_mask else ""
+        run_name += f"_seed.{args.seed}_{run_id}"
         wandb.init(
             name=run_name,
-            project=cli_args.wandb_project,
+            project=args.wandb_project,
             config={
                 "run_id": run_id,
-                "seed": cli_args.seed,
+                "seed": args.seed,
                 "num_params": num_params,
                 "num_tokens": num_tokens,
-                "use_mask": cli_args.use_mask,
+                "use_mask": args.use_mask,
             }
         )
 
@@ -587,7 +601,7 @@ if __name__ == "__main__":
             # log val loss to console and to logfile
             if master_process:
                 print(f'step:{step}/{args.num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/(timed_steps-1):.2f}ms')
-                if cli_args.wandb_project is not None:
+                if args.wandb_project is not None:
                     wandb.log(
                         {
                             "val/loss": val_loss,
@@ -648,7 +662,7 @@ if __name__ == "__main__":
         #dist.all_reduce(train_loss, op=dist.ReduceOp.AVG) # all-reducing the training loss would be more correct in terms of logging, but slower
         if master_process:
             approx_time = training_time_ms + 1000 * (time.time() - t0)
-            if cli_args.wandb_project is not None:
+            if args.wandb_project is not None:
                 wandb.log(
                     {
                         "train/loss": train_loss.item(),
