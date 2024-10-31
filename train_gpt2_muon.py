@@ -486,6 +486,7 @@ if __name__ == "__main__":
         api = HfApi()
         login(token=os.getenv("HF_API_TOKEN"))
         api.create_repo(args.hf_repo, exist_ok=True)
+        repo_id = args.hf_repo if args.hf_repo.startswith("snimu/") else f"snimu/{args.hf_repo}"
 
     # convenience variables
     B, T = args.device_batch_size, args.sequence_length
@@ -691,12 +692,14 @@ if __name__ == "__main__":
                     model=model.module,
                     filename=run_name + f"_{tokens_seen}_tokens_seen_step{step}.safetensors",
                 )
+                api.create_branch(repo_id=repo_id, branch_name=f"step{step}", exist_ok=True)
                 if args.hf_repo is not None:
                     api.upload_file(
                         path_or_fileobj=run_name + f"_{tokens_seen}_tokens_seen_step{step}.safetensors",
                         path_in_repo="model.safetensors",
-                        repo_id=args.hf_repo if args.hf_repo.startswith("snimu/") else f"snimu/{args.hf_repo}", 
+                        repo_id=repo_id, 
                         repo_type="model",
+                        repo_branch=f"step{step}",
                     )
 
     if master_process:
@@ -712,8 +715,9 @@ if __name__ == "__main__":
             api.upload_file(
                 path_or_fileobj=run_name + f"_{tokens_seen}_tokens_seen.safetensors",
                 path_in_repo="model.safetensors",
-                repo_id=args.hf_repo if args.hf_repo.startswith("snimu/") else f"snimu/{args.hf_repo}", 
+                repo_id=repo_id, 
                 repo_type="model",
+                branch="main",
             )
     # -------------------------------------------------------------------------
     # clean up nice
