@@ -699,7 +699,7 @@ if __name__ == "__main__":
                         path_in_repo="model.safetensors",
                         repo_id=repo_id, 
                         repo_type="model",
-                        repo_branch=f"step{step}",
+                        revision=f"step{step}",
                     )
 
     if master_process:
@@ -717,7 +717,7 @@ if __name__ == "__main__":
                 path_in_repo="model.safetensors",
                 repo_id=repo_id, 
                 repo_type="model",
-                branch="main",
+                revision="main",
             )
     # -------------------------------------------------------------------------
     # clean up nice
