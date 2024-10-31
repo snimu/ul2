@@ -510,8 +510,6 @@ if __name__ == "__main__":
     model = GPT(GPTConfig(vocab_size=num_vocab, n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd))
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print0(f"number of parameters: {num_params:_} ({format_num_params(num_params)})")
-    if master_process:
-        print(sum(p.numel() for p in model.parameters()))
     model = model.cuda()
     if hasattr(config, "coordinate_descent_tuning"):
         config.coordinate_descent_tuning = True # suggested by @Chillee
