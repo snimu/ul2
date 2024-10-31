@@ -692,7 +692,6 @@ if __name__ == "__main__":
                 safetensors.torch.save_model(
                     model=model.module,
                     filename=run_name + f"_{tokens_seen}_tokens_seen_step{step}.safetensors",
-                    metadata=args.__dict__,
                 )
                 if args.hf_repo is not None:
                     api.upload_file(
@@ -710,7 +709,6 @@ if __name__ == "__main__":
         safetensors.torch.save_model(
             model=model.module,
             filename=run_name + f"_{tokens_seen}_tokens_seen.safetensors",
-            metadata=args.__dict__,
         )
         if args.hf_repo is not None:
             api.upload_file(
