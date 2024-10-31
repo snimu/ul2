@@ -562,9 +562,9 @@ if __name__ == "__main__":
 
     if master_process and args.wandb_project is not None:
         num_tokens = int(args.batch_size * args.sequence_length * args.num_iterations)
-        run_name = format_num_params(num_params) + "-params" + f"_{num_tokens}-toks" + f"_w{args.n_embd}_d{args.n_layer}_h{args.n_head}_b{args.batch_size}_s{args.sequence_length}_i{args.num_iterations}"
+        run_name = format_num_params(num_params) + "-params" + f"_{format_num_params(num_tokens)}-toks" + f"_w{args.n_embd}_d{args.n_layer}_h{args.n_head}_b{args.batch_size}_s{args.sequence_length}_i{args.num_iterations}"
         run_name += "_withMask" if args.use_mask else ""
-        run_name += f"_seed.{args.seed}_{run_id}"
+        run_name += f"_seed.{args.seed}"
         wandb.init(
             name=run_name,
             project=args.wandb_project,
@@ -695,7 +695,7 @@ if __name__ == "__main__":
                     api.upload_file(
                         path_or_fileobj=run_name + f"_{tokens_seen}_tokens_seen_step{step}.safetensors",
                         path_in_repo="model.safetensors",
-                        repo_id=args.hf_repo,
+                        repo_id=args.hf_repo if args.hf_repo.startswith("snimu/") else f"snimu/{args.hf_repo}", 
                         repo_type="model",
                     )
 
@@ -712,7 +712,7 @@ if __name__ == "__main__":
             api.upload_file(
                 path_or_fileobj=run_name + f"_{tokens_seen}_tokens_seen.safetensors",
                 path_in_repo="model.safetensors",
-                repo_id=args.hf_repo,
+                repo_id=args.hf_repo if args.hf_repo.startswith("snimu/") else f"snimu/{args.hf_repo}", 
                 repo_type="model",
             )
     # -------------------------------------------------------------------------
