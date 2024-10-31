@@ -692,7 +692,7 @@ if __name__ == "__main__":
                     model=model.module,
                     filename=run_name + f"_{tokens_seen}_tokens_seen_step{step}.safetensors",
                 )
-                api.create_branch(repo_id=repo_id, branch_name=f"step{step}", exist_ok=True)
+                api.create_branch(repo_id=repo_id, branch=f"step{step}", exist_ok=True)
                 if args.hf_repo is not None:
                     api.upload_file(
                         path_or_fileobj=run_name + f"_{tokens_seen}_tokens_seen_step{step}.safetensors",
