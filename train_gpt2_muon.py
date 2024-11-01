@@ -337,12 +337,17 @@ def _randomize_with_mean(mean: int, clip_min: int = 1, clip_max: int = 15) -> in
     return int(x.round()[torch.randint(0, 1000, (1,))])
 
 class DistributedDataLoader:
-    def __init__(self, filename_pattern, B, T, process_rank, num_processes, use_mask=False):
+    def __init__(
+            self, filename_pattern, B, T, process_rank, num_processes, 
+            use_mask=False, clip_min=0, clip_max=15,
+    ):
         self.process_rank = process_rank
         self.num_processes = num_processes
         self.B = B
         self.T = T
         self.use_mask = use_mask
+        self.clip_min = clip_min
+        self.clip_max = clip_max
 
         # glob files that match the pattern
         self.files = sorted(glob.glob(filename_pattern))
@@ -376,9 +381,12 @@ class DistributedDataLoader:
         buf = torch.tensor(buf.astype(np.int32), dtype=torch.long)
         x = (buf[:-1]).view(B, T) # inputs
         if self.use_mask:
-            mean = random.choice((3, 8))  # R-denoising from UL2
-            mask_width = _randomize_with_mean(mean)  # jitter around mean --> allow arbitrary masking rates
-            x = _mask_spans(x, mask_width=mask_width, masking_rate=0.15, mask_token=50257)
+            # R-denoising from UL2
+            mean = random.choice((3, 8))
+            # jitter around mean --> allow arbitrary masking rates
+            mask_width = _randomize_with_mean(mean, clip_min=self.clip_min, clip_max=self.clip_max)
+            if mask_width > 0:
+                x = _mask_spans(x, mask_width=mask_width, masking_rate=0.15, mask_token=50257)
         y = (buf[1:]).view(B, T) # targets
         # advance current position and load next shard if necessary
         self.current_position += B * T * self.num_processes
@@ -447,6 +455,8 @@ class Hyperparameters:
     n_embd : int = 1536
     save_every: bool = False
     hf_repo: str = None
+    clip_min: int = 0
+    clip_max: int = 15
 
 
 if __name__ == "__main__":
@@ -459,6 +469,8 @@ if __name__ == "__main__":
     parser.add_argument("--n_embd", type=int, default=1536, help="default: 1536")
     parser.add_argument("--save_every", type=int, default=0, help="default: 0")
     parser.add_argument("--hf_repo", type=str, default=None, help="default: None")
+    parser.add_argument("--clip_min", type=int, default=0, help="default: 0")
+    parser.add_argument("--clip_max", type=int, default=15, help="default: 15")
     cli_args = parser.parse_args()
     args = Hyperparameters()
     args.use_mask = cli_args.use_mask
@@ -469,6 +481,8 @@ if __name__ == "__main__":
     args.n_embd = cli_args.n_embd
     args.save_every = cli_args.save_every
     args.hf_repo = cli_args.hf_repo
+    args.clip_min = cli_args.clip_min
+    args.clip_max = cli_args.clip_max
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
     assert torch.cuda.is_available()
@@ -498,7 +512,10 @@ if __name__ == "__main__":
     train_accumulation_steps = args.batch_size // (B * ddp_world_size)
 
     # load tokens
-    train_loader = DistributedDataLoader(args.input_bin, B, T, ddp_rank, ddp_world_size, use_mask=args.use_mask)
+    train_loader = DistributedDataLoader(
+        args.input_bin, B, T, ddp_rank, ddp_world_size, 
+        use_mask=args.use_mask, clip_min=args.clip_min, clip_max=args.clip_max,
+    )
     val_loader = DistributedDataLoader(args.input_val_bin, B, T, ddp_rank, ddp_world_size)
     if master_process:
         print(f"Training DataLoader: total number of tokens: {train_loader.ntok_total} across {len(train_loader.files)} files")
