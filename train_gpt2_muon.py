@@ -429,37 +429,6 @@ def make_bignum_nice(num_params: int, round_to_digits: int = 1, unit: Literal[1,
     return f"{before_dot}{after_dot}{scalar}"
 
 
-@dataclass
-class Hyperparameters:
-    # data hyperparams
-    input_bin : str = 'edu_fineweb100B/edu_fineweb_train*' # input .bin to train on
-    input_val_bin : str = 'edu_fineweb100B/edu_fineweb_val*' # input .bin to eval validation loss on
-    # optimization hyperparams
-    batch_size : int = 8*60 # batch size, in sequences, across all devices
-    device_batch_size : int = 12 # batch size, in sequences, per device
-    sequence_length : int = 1024 # sequence length, in tokens
-    num_iterations : int = 203_450  # 100B tokens # int(0.75*2*10172) # number of iterations to run  # 15_258
-    learning_rate : float = 0.0036 / 2
-    warmup_iters : int = 0
-    warmdown_iters : int = int(0.75*2*2906) # number of iterations of linear warmup/warmdown for triangular or trapezoidal schedule  # 4359s
-    weight_decay : float = 0
-    # evaluation and logging hyperparams
-    val_loss_every : int = 325 # every how many steps to evaluate val loss? 0 for only at the end
-    val_tokens : int = 10420224 # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
-    save_every : int = 0 # every how many steps to save the checkpoint? 0 for only at the end
-    # cli args
-    use_mask : bool = False
-    wandb_project : str = None
-    seed : int = 0
-    n_layer : int = 52
-    n_head : int = 12
-    n_embd : int = 1536
-    save_every: bool = False
-    hf_repo: str = None
-    clip_min: int = 0
-    clip_max: int = 15
-
-
 def main(
         input_bin: str = "edu_fineweb100B/edu_fineweb_train*",
         input_val_bin: str = "edu_fineweb100B/edu_fineweb_val*",
@@ -720,8 +689,8 @@ def main(
                     model=model.module,
                     filename=run_name + f"_{tokens_seen}_tokens_seen_step{step}.safetensors",
                 )
-                api.create_branch(repo_id=repo_id, branch=f"step{step}", exist_ok=True)
                 if hf_repo is not None:
+                    api.create_branch(repo_id=repo_id, branch=f"step{step}", exist_ok=True)
                     api.upload_file(
                         path_or_fileobj=run_name + f"_{tokens_seen}_tokens_seen_step{step}.safetensors",
                         path_in_repo="model.safetensors",
