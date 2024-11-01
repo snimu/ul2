@@ -580,7 +580,13 @@ if __name__ == "__main__":
 
     if master_process and args.wandb_project is not None:
         num_tokens = int(args.batch_size * args.sequence_length * args.num_iterations)
-        run_name = make_bignum_nice(num_params) + "-params" + f"_{make_bignum_nice(num_tokens)}-toks" + f"_w{args.n_embd}_d{args.n_layer}_h{args.n_head}_b{args.batch_size}_s{args.sequence_length}_i{args.num_iterations}"
+        run_name = (
+            f"p{make_bignum_nice(num_params)}"
+            f"_t{make_bignum_nice(num_tokens)}" 
+            f"_w{args.n_embd}_d{args.n_layer}_h{args.n_head}"
+            f"_b{args.batch_size}_s{args.sequence_length}_i{args.num_iterations}"
+            f"_clip{args.clip_min}-{args.clip_max}"
+        )
         run_name += "_withMask" if args.use_mask else ""
         run_name += f"_seed.{args.seed}"
         wandb.init(
