@@ -533,13 +533,14 @@ def main(
     )
     run_name += "_withMask" if use_mask else ""
     run_name += f"_seed{seed}"
+    print0(f"run name: {run_name}")
 
     if hf_repo is not None:
         assert os.getenv("HF_API_TOKEN") is not None, "You need to set the HF_API_TOKEN environment variable to upload the model to Hugging Face"
         api = HfApi()
         login(token=os.getenv("HF_API_TOKEN"))
-        api.create_repo(hf_repo, exist_ok=True)
         repo_id = hf_repo if hf_repo.startswith("snimu/") else f"snimu/{run_name}"
+        api.create_repo(repo_id, exist_ok=True)
 
     model = model.cuda()
     if hasattr(config, "coordinate_descent_tuning"):
