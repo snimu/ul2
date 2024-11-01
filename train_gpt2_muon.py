@@ -331,7 +331,7 @@ def _mask_spans(
     return inputs
 
 
-def _randomize_with_mean(mean: int, clip_min: int = 1, clip_max: int = 15) -> int | float:
+def _randomize_with_mean(mean: int, clip_min: int = 0, clip_max: int = 15) -> int | float:
     x = torch.randn(1000) * mean / 4 + mean
     x = torch.clamp(x, clip_min, clip_max)
     return int(x.round()[torch.randint(0, 1000, (1,))])
