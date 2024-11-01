@@ -529,7 +529,7 @@ def main(
 
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print0(f"number of parameters: {num_params:_} ({make_bignum_nice(num_params)})")
-    
+
     num_tokens = int(batch_size * sequence_length * num_iterations)
     run_name = (
         f"p{make_bignum_nice(num_params)}"
@@ -539,7 +539,7 @@ def main(
         f"_clip{clip_min}-{clip_max}"
     )
     run_name += "_withMask" if use_mask else ""
-    run_name += f"_seed.{seed}"
+    run_name += f"_seed{seed}"
 
     model = model.cuda()
     if hasattr(config, "coordinate_descent_tuning"):
