@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass
 import math
 import random
+from typing import Literal
 
 import typer
 import wandb
@@ -405,14 +406,14 @@ def print0(*args, **kwargs):
         print(*args, **kwargs)
 
 
-def make_bignum_nice(num_params: int, round_to_digits: int = 1) -> str:
-    if num_params < 1_000:
+def make_bignum_nice(num_params: int, round_to_digits: int = 1, unit: Literal[1, 1000, 1000000, 1000000000] = 1) -> str:
+    if unit == 1 and num_params < 1_000:
         pnum = str(round(num_params, max(0, round_to_digits)))
         scalar = ""
-    elif num_params < 1_000_000:
+    elif (unit > 1000 and num_params < 1_000_000) or unit == 1000:
         pnum = f"{round(num_params/1_000, max(0, round_to_digits))}"
         scalar = "k"
-    elif num_params < 1_000_000_000:
+    elif (unit > 1_000_000 and num_params < 1_000_000_000) or unit == 1_000_000:
         pnum = f"{round(num_params/1_000_000, max(0, round_to_digits))}"
         scalar = "M"
     else:
@@ -525,7 +526,7 @@ def main(
 
     num_tokens = int(batch_size * sequence_length * num_iterations)
     run_name = (
-        f"p{make_bignum_nice(num_params)}"
+        f"p{make_bignum_nice(num_params, unit=1000000)}"
         f"_t{make_bignum_nice(num_tokens)}" 
         f"_w{n_embd}_d{n_layer}_h{n_head}"
         f"_b{batch_size}_s{sequence_length}_i{num_iterations}"
