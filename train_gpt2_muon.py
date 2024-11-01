@@ -397,7 +397,7 @@ def print0(*args, **kwargs):
         print(*args, **kwargs)
 
 
-def format_num_params(num_params: int, round_to_digits: int = 1) -> str:
+def make_bignum_nice(num_params: int, round_to_digits: int = 1) -> str:
     if num_params < 1_000:
         pnum = str(round(num_params, max(0, round_to_digits)))
         scalar = ""
@@ -510,7 +510,7 @@ if __name__ == "__main__":
     num_vocab = 50304
     model = GPT(GPTConfig(vocab_size=num_vocab, n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd))
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print0(f"number of parameters: {num_params:_} ({format_num_params(num_params)})")
+    print0(f"number of parameters: {num_params:_} ({make_bignum_nice(num_params)})")
     model = model.cuda()
     if hasattr(config, "coordinate_descent_tuning"):
         config.coordinate_descent_tuning = True # suggested by @Chillee
@@ -563,7 +563,7 @@ if __name__ == "__main__":
 
     if master_process and args.wandb_project is not None:
         num_tokens = int(args.batch_size * args.sequence_length * args.num_iterations)
-        run_name = format_num_params(num_params) + "-params" + f"_{format_num_params(num_tokens)}-toks" + f"_w{args.n_embd}_d{args.n_layer}_h{args.n_head}_b{args.batch_size}_s{args.sequence_length}_i{args.num_iterations}"
+        run_name = make_bignum_nice(num_params) + "-params" + f"_{make_bignum_nice(num_tokens)}-toks" + f"_w{args.n_embd}_d{args.n_layer}_h{args.n_head}_b{args.batch_size}_s{args.sequence_length}_i{args.num_iterations}"
         run_name += "_withMask" if args.use_mask else ""
         run_name += f"_seed.{args.seed}"
         wandb.init(
