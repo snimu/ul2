@@ -1,7 +1,6 @@
 
 """Modified from https://github.com/KellerJordan/modded-nanogpt/blob/master/records/102024_ScaleUp1B/c0078066-c8c9-49c8-868a-ff4d4f32e615.txt"""
 
-import argparse
 import os
 import sys
 with open(sys.argv[0]) as f:
@@ -13,6 +12,7 @@ from dataclasses import dataclass
 import math
 import random
 
+import typer
 import wandb
 import numpy as np
 import torch
@@ -459,30 +459,30 @@ class Hyperparameters:
     clip_max: int = 15
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--use_mask", action="store_true")
-    parser.add_argument("--wandb_project", type=str, default=None, help="default: None")
-    parser.add_argument("--seed", type=int, default=0, help="default: 0")
-    parser.add_argument("--n_layer", type=int, default=52, help="default: 52")
-    parser.add_argument("--n_head", type=int, default=12, help="default: 12")
-    parser.add_argument("--n_embd", type=int, default=1536, help="default: 1536")
-    parser.add_argument("--save_every", type=int, default=0, help="default: 0")
-    parser.add_argument("--hf_repo", type=str, default=None, help="default: None")
-    parser.add_argument("--clip_min", type=int, default=0, help="default: 0")
-    parser.add_argument("--clip_max", type=int, default=15, help="default: 15")
-    cli_args = parser.parse_args()
-    args = Hyperparameters()
-    args.use_mask = cli_args.use_mask
-    args.wandb_project = cli_args.wandb_project
-    args.seed = cli_args.seed
-    args.n_layer = cli_args.n_layer
-    args.n_head = cli_args.n_head
-    args.n_embd = cli_args.n_embd
-    args.save_every = cli_args.save_every
-    args.hf_repo = cli_args.hf_repo
-    args.clip_min = cli_args.clip_min
-    args.clip_max = cli_args.clip_max
+def main(
+        input_bin: str = "edu_fineweb100B/edu_fineweb_train*",
+        input_val_bin: str = "edu_fineweb100B/edu_fineweb_val*",
+        batch_size: int = 8*60,
+        device_batch_size: int = 12,
+        sequence_length: int = 1024,
+        num_iterations: int = 203_450,
+        learning_rate: float = 0.0036 / 2,
+        warmup_iters: int = 0,
+        warmdown_iters: int = int(0.75*2*2906),
+        weight_decay: float = 0,
+        val_loss_every: int = 325,
+        val_tokens: int = 10_420_224,
+        use_mask: bool = False,
+        wandb_project: str = None,
+        seed: int = 0,
+        n_layer: int = 52,
+        n_head: int = 12,
+        n_embd: int = 1536,
+        save_every: bool = False,
+        hf_repo: str = None,
+        clip_min: int = 0,
+        clip_max: int = 15,
+):
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
     assert torch.cuda.is_available()
@@ -495,28 +495,28 @@ if __name__ == "__main__":
     print(f"using device: {device}")
     master_process = (ddp_rank == 0) # this process will do logging, checkpointing etc.
 
-    if master_process and args.hf_repo is not None:
+    if master_process and hf_repo is not None:
         assert os.getenv("HF_API_TOKEN") is not None, "You need to set the HF_API_TOKEN environment variable to upload the model to Hugging Face"
         api = HfApi()
         login(token=os.getenv("HF_API_TOKEN"))
-        api.create_repo(args.hf_repo, exist_ok=True)
-        repo_id = args.hf_repo if args.hf_repo.startswith("snimu/") else f"snimu/{args.hf_repo}"
+        api.create_repo(hf_repo, exist_ok=True)
+        repo_id = hf_repo if hf_repo.startswith("snimu/") else f"snimu/{hf_repo}"
 
     # convenience variables
-    B, T = args.device_batch_size, args.sequence_length
+    B, T = device_batch_size, sequence_length
     # calculate the number of steps to take in the val loop.
-    assert args.val_tokens % (B * T * ddp_world_size) == 0
-    val_steps = args.val_tokens // (B * T * ddp_world_size)
+    assert val_tokens % (B * T * ddp_world_size) == 0
+    val_steps = val_tokens // (B * T * ddp_world_size)
     # calculate the steps of gradient accumulation required to attain the desired global batch size.
-    assert args.batch_size % (B * ddp_world_size) == 0
-    train_accumulation_steps = args.batch_size // (B * ddp_world_size)
+    assert batch_size % (B * ddp_world_size) == 0
+    train_accumulation_steps = batch_size // (B * ddp_world_size)
 
     # load tokens
     train_loader = DistributedDataLoader(
-        args.input_bin, B, T, ddp_rank, ddp_world_size, 
-        use_mask=args.use_mask, clip_min=args.clip_min, clip_max=args.clip_max,
+        input_bin, B, T, ddp_rank, ddp_world_size, 
+        use_mask=use_mask, clip_min=clip_min, clip_max=clip_max,
     )
-    val_loader = DistributedDataLoader(args.input_val_bin, B, T, ddp_rank, ddp_world_size)
+    val_loader = DistributedDataLoader(input_val_bin, B, T, ddp_rank, ddp_world_size)
     if master_process:
         print(f"Training DataLoader: total number of tokens: {train_loader.ntok_total} across {len(train_loader.files)} files")
         print(f"Validation DataLoader: total number of tokens: {val_loader.ntok_total} across {len(val_loader.files)} files")
@@ -525,7 +525,7 @@ if __name__ == "__main__":
     # there are only 50257 unique GPT-2 tokens; we extend to nearest multiple of 128 for efficiency. suggested to me by @Grad62304977.
     # this originates from Karpathy's experiments.
     num_vocab = 50304
-    model = GPT(GPTConfig(vocab_size=num_vocab, n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd))
+    model = GPT(GPTConfig(vocab_size=num_vocab, n_layer=n_layer, n_head=n_head, n_embd=n_embd))
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print0(f"number of parameters: {num_params:_} ({make_bignum_nice(num_params)})")
     model = model.cuda()
@@ -538,23 +538,23 @@ if __name__ == "__main__":
     ctx = torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16)
 
     # init the optimizer(s)
-    optimizer1 = torch.optim.AdamW(raw_model.lm_head.parameters(), lr=args.learning_rate, betas=(0.9, 0.95),
-                                weight_decay=args.weight_decay, fused=True)
-    optimizer2 = Muon(raw_model.transformer.h.parameters(), lr=0.1*args.learning_rate, momentum=0.95,
+    optimizer1 = torch.optim.AdamW(raw_model.lm_head.parameters(), lr=learning_rate, betas=(0.9, 0.95),
+                                weight_decay=weight_decay, fused=True)
+    optimizer2 = Muon(raw_model.transformer.h.parameters(), lr=0.1*learning_rate, momentum=0.95,
                     rank=ddp_rank, world_size=ddp_world_size)
     optimizers = [optimizer1, optimizer2]
     # learning rate decay scheduler (linear warmup and warmdown)
     def get_lr(it):
-        assert it <= args.num_iterations
+        assert it <= num_iterations
         # 1) linear warmup for warmup_iters steps
-        if it < args.warmup_iters:
-            return (it+1) / args.warmup_iters
+        if it < warmup_iters:
+            return (it+1) / warmup_iters
         # 2) constant lr for a while
-        elif it < args.num_iterations - args.warmdown_iters:
+        elif it < num_iterations - warmdown_iters:
             return 1.0
         # 3) linear warmdown
         else:
-            decay_ratio = (args.num_iterations - it) / args.warmdown_iters
+            decay_ratio = (num_iterations - it) / warmdown_iters
             return decay_ratio
     schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimizers]
 
@@ -578,26 +578,26 @@ if __name__ == "__main__":
             f.write(f'{result.stdout}\n')
             f.write('='*100 + '\n')
 
-    if master_process and args.wandb_project is not None:
-        num_tokens = int(args.batch_size * args.sequence_length * args.num_iterations)
+    if master_process and wandb_project is not None:
+        num_tokens = int(batch_size * sequence_length * num_iterations)
         run_name = (
             f"p{make_bignum_nice(num_params)}"
             f"_t{make_bignum_nice(num_tokens)}" 
-            f"_w{args.n_embd}_d{args.n_layer}_h{args.n_head}"
-            f"_b{args.batch_size}_s{args.sequence_length}_i{args.num_iterations}"
-            f"_clip{args.clip_min}-{args.clip_max}"
+            f"_w{n_embd}_d{n_layer}_h{n_head}"
+            f"_b{batch_size}_s{sequence_length}_i{num_iterations}"
+            f"_clip{clip_min}-{clip_max}"
         )
-        run_name += "_withMask" if args.use_mask else ""
-        run_name += f"_seed.{args.seed}"
+        run_name += "_withMask" if use_mask else ""
+        run_name += f"_seed.{seed}"
         wandb.init(
             name=run_name,
-            project=args.wandb_project,
+            project=wandb_project,
             config={
                 "run_id": run_id,
-                "seed": args.seed,
+                "seed": seed,
                 "num_params": num_params,
                 "num_tokens": num_tokens,
-                "use_mask": args.use_mask,
+                "use_mask": use_mask,
             }
         )
 
@@ -607,8 +607,8 @@ if __name__ == "__main__":
     t0 = time.time()
     # begin training
     train_loader.reset()
-    for step in range(args.num_iterations + 1):
-        last_step = (step == args.num_iterations)
+    for step in range(num_iterations + 1):
+        last_step = (step == num_iterations)
         # This effectively ignores timing first 10 steps, which are slower for weird reasons.
         # Alternately, and slightly more correctly in terms of benchmarking, we could do 10
         # steps with dummy data first, and then re-initialize the model and reset the loader.
@@ -618,7 +618,7 @@ if __name__ == "__main__":
         timed_steps = float('nan') if step <= 11 else (step - 10) + 1 # <= 11 to avoid bug in val
 
         # once in a while evaluate the validation dataset
-        if (last_step or (args.val_loss_every > 0 and step % args.val_loss_every == 0)):
+        if (last_step or (val_loss_every > 0 and step % val_loss_every == 0)):
             # stop the clock
             torch.cuda.synchronize()
             training_time_ms += 1000 * (time.time() - t0)
@@ -636,8 +636,8 @@ if __name__ == "__main__":
             val_loss /= val_steps
             # log val loss to console and to logfile
             if master_process:
-                print(f'step:{step}/{args.num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/(timed_steps-1):.2f}ms')
-                if args.wandb_project is not None:
+                print(f'step:{step}/{num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/(timed_steps-1):.2f}ms')
+                if wandb_project is not None:
                     wandb.log(
                         {
                             "val/loss": val_loss,
@@ -646,12 +646,12 @@ if __name__ == "__main__":
                         }
                     )
                 with open(logfile, "a") as f:
-                    f.write(f'step:{step}/{args.num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/(timed_steps-1):.2f}ms\n')
+                    f.write(f'step:{step}/{num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/(timed_steps-1):.2f}ms\n')
             # start the clock again
             torch.cuda.synchronize()
             t0 = time.time()
 
-        if master_process and (last_step or (args.save_every > 0 and step % args.save_every == 0)):
+        if master_process and (last_step or (save_every > 0 and step % save_every == 0)):
             # stop the clock
             torch.cuda.synchronize()
             training_time_ms += 1000 * (time.time() - t0)
@@ -698,7 +698,7 @@ if __name__ == "__main__":
         #dist.all_reduce(train_loss, op=dist.ReduceOp.AVG) # all-reducing the training loss would be more correct in terms of logging, but slower
         if master_process:
             approx_time = training_time_ms + 1000 * (time.time() - t0)
-            if args.wandb_project is not None:
+            if wandb_project is not None:
                 wandb.log(
                     {
                         "train/loss": train_loss.item(),
@@ -706,17 +706,17 @@ if __name__ == "__main__":
                         "train/tokens_seen": int(B * T * ddp_world_size * (step + 1)),
                     }
                 )
-            print(f"step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.0f}ms step_avg:{approx_time/timed_steps:.2f}ms")
+            print(f"step:{step+1}/{num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.0f}ms step_avg:{approx_time/timed_steps:.2f}ms")
             with open(logfile, "a") as f:
-                f.write(f"step:{step+1}/{args.num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.0f}ms step_avg:{approx_time/timed_steps:.2f}ms\n")
-            if args.save_every > 0 and step % args.save_every == 0:
+                f.write(f"step:{step+1}/{num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.0f}ms step_avg:{approx_time/timed_steps:.2f}ms\n")
+            if save_every > 0 and step % save_every == 0:
                 tokens_seen = int(B * T * ddp_world_size * step)
                 safetensors.torch.save_model(
                     model=model.module,
                     filename=run_name + f"_{tokens_seen}_tokens_seen_step{step}.safetensors",
                 )
                 api.create_branch(repo_id=repo_id, branch=f"step{step}", exist_ok=True)
-                if args.hf_repo is not None:
+                if hf_repo is not None:
                     api.upload_file(
                         path_or_fileobj=run_name + f"_{tokens_seen}_tokens_seen_step{step}.safetensors",
                         path_in_repo="model.safetensors",
@@ -728,13 +728,13 @@ if __name__ == "__main__":
     if master_process:
         print(f"peak memory consumption: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB")
 
-    if master_process and args.save_every > 0:  # always save the final model
-        tokens_seen = int(B * T * ddp_world_size * args.num_iterations)
+    if master_process and save_every > 0:  # always save the final model
+        tokens_seen = int(B * T * ddp_world_size * num_iterations)
         safetensors.torch.save_model(
             model=model.module,
             filename=run_name + f"_{tokens_seen}_tokens_seen.safetensors",
         )
-        if args.hf_repo is not None:
+        if hf_repo is not None:
             api.upload_file(
                 path_or_fileobj=run_name + f"_{tokens_seen}_tokens_seen.safetensors",
                 path_in_repo="model.safetensors",
@@ -745,3 +745,7 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------
     # clean up nice
     dist.destroy_process_group()
+
+
+if __name__ == "__main__":
+    typer.run(main)
