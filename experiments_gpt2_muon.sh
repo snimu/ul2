@@ -1,2 +1,2 @@
-torchrun train_gpt2_muon.py --input-bin="../edu_fineweb100B/edu_fineweb_train*" --input-val-bin="../edu_fineweb100B/edu_fineweb_val*" --wandb-project="ul2.gpt2.muon" --save-every=10000 --hf-repo="" --use-mask
-torchrun train_gpt2_muon.py --input-bin="../edu_fineweb100B/edu_fineweb_train*" --input-val-bin="../edu_fineweb100B/edu_fineweb_val*" --wandb-project="ul2.gpt2.muon" --save-every=10000 --hf-repo=""
+torchrun --nproc_per_node=8 train_gpt2_muon.py --input-bin="../edu_fineweb100B/edu_fineweb_train*" --input-val-bin="../edu_fineweb100B/edu_fineweb_val*" --wandb-project="ul2.gpt2.muon" --save-every=10000 --hf-repo="" --use-mask
+torchrun --nproc_per_node=8 train_gpt2_muon.py --input-bin="../edu_fineweb100B/edu_fineweb_train*" --input-val-bin="../edu_fineweb100B/edu_fineweb_val*" --wandb-project="ul2.gpt2.muon" --save-every=10000 --hf-repo=""
