@@ -1,0 +1,2 @@
+torchrun train_gpt2_muon.py --input-bin="../edu_fineweb100B/edu_fineweb_train*" --input-val-bin="../edu_fineweb100B/edu_fineweb_val*"--use-mask --save-every=10000 --hf-repo="" --use-mask
+torchrun train_gpt2_muon.py --input-bin="../edu_fineweb100B/edu_fineweb_train*" --input-val-bin="../edu_fineweb100B/edu_fineweb_val*"--use-mask --save-every=10000 --hf-repo=""
