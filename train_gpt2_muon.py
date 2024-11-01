@@ -526,7 +526,7 @@ def main(
 
     num_tokens = int(batch_size * sequence_length * num_iterations)
     run_name = (
-        f"p{make_bignum_nice(num_params, unit=1000000)}"
+        f"p{make_bignum_nice(num_params, round_to_digits=0, unit=1000000)}"
         f"_t{make_bignum_nice(num_tokens)}" 
         f"_w{n_embd}_d{n_layer}_h{n_head}"
         f"_b{batch_size}_s{sequence_length}_i{num_iterations}"
