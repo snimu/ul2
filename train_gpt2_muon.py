@@ -478,7 +478,7 @@ def main(
         n_layer: int = 52,
         n_head: int = 12,
         n_embd: int = 1536,
-        save_every: bool = False,
+        save_every: int = 0,
         hf_repo: str = None,
         clip_min: int = 0,
         clip_max: int = 15,
