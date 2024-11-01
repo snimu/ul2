@@ -495,13 +495,6 @@ def main(
     print(f"using device: {device}")
     master_process = (ddp_rank == 0) # this process will do logging, checkpointing etc.
 
-    if master_process and hf_repo is not None:
-        assert os.getenv("HF_API_TOKEN") is not None, "You need to set the HF_API_TOKEN environment variable to upload the model to Hugging Face"
-        api = HfApi()
-        login(token=os.getenv("HF_API_TOKEN"))
-        api.create_repo(hf_repo, exist_ok=True)
-        repo_id = hf_repo if hf_repo.startswith("snimu/") else f"snimu/{hf_repo}"
-
     # convenience variables
     B, T = device_batch_size, sequence_length
     # calculate the number of steps to take in the val loop.
@@ -540,6 +533,13 @@ def main(
     )
     run_name += "_withMask" if use_mask else ""
     run_name += f"_seed{seed}"
+
+    if hf_repo is not None:
+        assert os.getenv("HF_API_TOKEN") is not None, "You need to set the HF_API_TOKEN environment variable to upload the model to Hugging Face"
+        api = HfApi()
+        login(token=os.getenv("HF_API_TOKEN"))
+        api.create_repo(hf_repo, exist_ok=True)
+        repo_id = hf_repo if hf_repo.startswith("snimu/") else f"snimu/{run_name}"
 
     model = model.cuda()
     if hasattr(config, "coordinate_descent_tuning"):
