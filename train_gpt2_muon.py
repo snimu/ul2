@@ -616,7 +616,7 @@ def main(
                         {
                             "val/loss": val_loss,
                             "val/step": step,
-                            "val/tokens_seen": int(B * T * ddp_world_size * step),
+                            "val/tokens_seen": int(batch_size * sequence_length * step),
                         }
                     )
                 with open(logfile, "a") as f:
@@ -677,7 +677,7 @@ def main(
                     {
                         "train/loss": train_loss.item(),
                         "train/step": step,
-                        "train/tokens_seen": int(B * T * ddp_world_size * (step + 1)),
+                        "train/tokens_seen": int(batch_size * sequence_length * (step + 1)),
                     }
                 )
             print(f"step:{step+1}/{num_iterations} train_loss:{train_loss.item():.4f} train_time:{approx_time:.0f}ms step_avg:{approx_time/timed_steps:.2f}ms")
