@@ -5,6 +5,8 @@ from typing import Any, Literal
 from pathlib import Path
 import gzip
 import json
+import itertools
+from dataclasses import dataclass
 from tqdm import tqdm
 
 from dotenv import load_dotenv
@@ -62,6 +64,7 @@ def choose_preference(
 max_seq_len = 4096
 
 
+# HLB-GPT model
 with torch.no_grad():
     # Create the base arrays for the learnable linear positional bias. This helps save some memory consumption & processing time
     bias_range                    = torch.arange(-max_seq_len+1, 1).to("cuda", dtype=torch.bfloat16)
@@ -132,13 +135,8 @@ class LatentAttentionBlock(nn.Module):
         x = residual + out
 
         return x
+        
 
-
-#############################################
-#            Network Definition             #
-#############################################
-
-# This may seem like an odd way to define a network, but it's a bit easier to hack into/make quick changes than other methods
 class SpeedyLangNet(nn.Module):
     def __init__(self, network_dict):
         super().__init__()
@@ -181,7 +179,147 @@ def make_net(settings: dict[str, Any]):
     return net
 
 
+# GPT2-MUON model
+
+class Rotary(torch.nn.Module):
+
+    def __init__(self, dim, base=10000):
+        super().__init__()
+        self.inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
+        self.seq_len_cached = None
+        self.cos_cached = None
+        self.sin_cached = None
+
+    def forward(self, x):
+        seq_len = x.shape[1]
+        if seq_len != self.seq_len_cached:
+            self.seq_len_cached = seq_len
+            t = torch.arange(seq_len, device=x.device).type_as(self.inv_freq)
+            freqs = torch.outer(t, self.inv_freq).to(x.device)
+            self.cos_cached = freqs.cos().bfloat16()
+            self.sin_cached = freqs.sin().bfloat16()
+        return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :]
+
+def apply_rotary_emb(x, cos, sin):
+    assert x.ndim == 4 # multihead attention
+    d = x.shape[3]//2
+    x1 = x[..., :d]
+    x2 = x[..., d:]
+    y1 = x1 * cos + x2 * sin
+    y2 = x1 * (-sin) + x2 * cos
+    return torch.cat([y1, y2], 3).type_as(x)
+
+class CausalSelfAttention(nn.Module):
+
+    def __init__(self, config):
+        super().__init__()
+        self.n_head = config.n_head
+        self.n_embd = config.n_embd
+        self.head_dim = self.n_embd // self.n_head
+        assert self.n_embd % self.n_head == 0
+        self.c_q = nn.Linear(self.n_embd, self.n_embd, bias=False)
+        self.c_k = nn.Linear(self.n_embd, self.n_embd, bias=False)
+        self.c_v = nn.Linear(self.n_embd, self.n_embd, bias=False)
+        # output projection
+        self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
+        self.c_proj.weight.data.zero_() # zero init suggested by @Grad62304977
+        self.rotary = Rotary(self.head_dim)
+
+    def forward(self, x):
+        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        q = self.c_q(x).view(B, T, self.n_head, self.head_dim)
+        k = self.c_k(x).view(B, T, self.n_head, self.head_dim)
+        v = self.c_v(x).view(B, T, self.n_head, self.head_dim)
+        cos, sin = self.rotary(q)
+        q, k = F.rms_norm(q, (q.size(-1),)), F.rms_norm(k, (k.size(-1),)) # QK norm suggested by @Grad62304977
+        q, k = apply_rotary_emb(q, cos, sin), apply_rotary_emb(k, cos, sin)
+        y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True)
+        y = y.transpose(1, 2).contiguous().view_as(x) # re-assemble all head outputs side by side
+        y = self.c_proj(y)
+        return y
+
+class MLP(nn.Module):
+
+    def __init__(self, config):
+        super().__init__()
+        self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=False)
+        self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=False)
+        self.c_proj.weight.data.zero_() # zero init suggested by @Grad62304977
+
+    def forward(self, x):
+        x = self.c_fc(x)
+        x = F.relu(x).square() # https://arxiv.org/abs/2109.08668v2; ~1-2% better than GELU; suggested by @SKYLINEZ007 and @Grad62304977
+        x = self.c_proj(x)
+        return x
+
+class Block(nn.Module):
+
+    def __init__(self, config):
+        super().__init__()
+        self.attn = CausalSelfAttention(config)
+        self.mlp = MLP(config)
+
+    def forward(self, x):
+        x = x + self.attn(F.rms_norm(x, (x.size(-1),)))
+        x = x + self.mlp(F.rms_norm(x, (x.size(-1),)))
+        return x
+
+# -----------------------------------------------------------------------------
+# The main GPT-2 model
+
+@dataclass
+class GPTConfig:
+    vocab_size : int = 50304
+    n_layer : int = 12
+    n_head : int = 6 # head dim 128 suggested by @Grad62304977
+    n_embd : int = 768
+
+class GPT(nn.Module):
+
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+        self.transformer = nn.ModuleDict(dict(
+            wte = nn.Embedding(config.vocab_size, config.n_embd),
+            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+        ))
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
+
+    def forward(self, idx, targets=None, return_logits=True):
+
+        # forward the GPT model itself
+        x = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
+        for block in self.transformer.h:
+            x = block(x)
+        x = F.rms_norm(x, (x.size(-1),))
+
+        if targets is not None:
+            # if we are given some desired targets also calculate the loss
+            logits = self.lm_head(x)
+            logits = logits.float() # use tf32/fp32 for logits
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+        else:
+            # inference-time mini-optimization: only forward the lm_head on the very last position
+            logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
+            logits = logits.float() # use tf32/fp32 for logits
+            loss = None
+
+        # there are performance reasons why not returning logits is prudent, if not needed
+        if not return_logits:
+            logits = None
+
+        return logits
+
 def make_net_from_name(name: str) -> SpeedyLangNet:
+    if "1549M" in name:
+        return GPT(GPTConfig(
+            vocab_size=50304,
+            n_layer=52,
+            n_head=12,
+            n_embd=1536,
+        ))
     if "46M" in name:
         depth, width =  8, 384
     elif "240M" in name:
@@ -350,8 +488,10 @@ def calc_l2_loss(logprobs_c1: torch.Tensor, logprobs_c2: torch.Tensor) -> float:
 
 def calc_preference_stats(
         sentence: str,
-        completion_c: str, 
-        completion_r: str, 
+        completion_a: str, 
+        completion_b: str, 
+        meaning_a: str,
+        meaning_b: str,
         openai_model: str = "gpt-4o-mini",
         num_samples: int = 10,
 ) -> dict[
@@ -368,41 +508,45 @@ def calc_preference_stats(
     if not num_samples:
         raise ValueError("num_samples must be positive")
     
-    preferences = dict(c=0, r=0, details=[])
+    preferences = {meaning_a: 0, meaning_b: 0, "details": []}
     for i in range(num_samples // 2):
-        preference1 = choose_preference(
+        preference_ab = choose_preference(
             base_text=sentence,
-            completion1=completion_c,
-            completion2=completion_r,
+            completion1=completion_a,
+            completion2=completion_b,
             openai_model=openai_model,
         )
-        preference2 = choose_preference(
+        preference_ba = choose_preference(
             base_text=sentence,
-            completion1=completion_r,
-            completion2=completion_c,
+            completion1=completion_b,
+            completion2=completion_a,
             openai_model=openai_model,
         )
         preferences["details"].append(
             {
-                "preference_cr": {
-                    "better_completion": "c" if preference1.better_completion == "completion1" else "r", 
-                    "reflection": preference1.reflection,
+                "preference_ab": {
+                    "better_completion": preference_ab.better_completion, 
+                    "reflection": preference_ab.reflection,
+                    "meaning_a": meaning_a,
+                    "meaning_b": meaning_b,
                 },
-                "preference_rc": {
-                    "better_completion": "r" if preference2.better_completion == "completion1" else "c", 
-                    "reflection": preference2.reflection,
+                "preference_ba": {
+                    "better_completion": preference_ba.better_completion, 
+                    "reflection": preference_ba.reflection,
+                    "meaning_a": meaning_a,
+                    "meaning_b": meaning_b,
                 },
             }   
         )
-        if preference1.better_completion == "completion1":
-            preferences["c"] += 1
+        if preference_ab.better_completion == "completion1":
+            preferences[meaning_a] += 1
         else:
-            preferences["r"] += 1
+            preferences[meaning_b] += 1
 
-        if preference2.better_completion == "completion1":
-            preferences["r"] += 1
+        if preference_ba.better_completion == "completion1":
+            preferences[meaning_b] += 1
         else:
-            preferences["c"] += 1
+            preferences[meaning_a] += 1
         
     return preferences
 
@@ -415,7 +559,6 @@ def test_free_completion(
         verbosity: int = 1, 
         max_choose_nth_best: int = 3,
         masking_rate: float = 0.0,
-        num_preference_samples: int = 0,
         stepsize: int = 1,
 ) -> dict[str, Any]:
     results = dict()
@@ -450,17 +593,6 @@ def test_free_completion(
             num_unique_words_r = len(set(completion_r.split()))
             num_unique_tokens_r = len(set(gen_toks_r))
 
-            if num_preference_samples:
-                preferences = calc_preference_stats(  # TODO: calc prefs btw tok numbers (1st vs 2nd most likely token)
-                    sentence=sentence,
-                    completion_c=completion_c,
-                    completion_r=completion_r,
-                    num_samples=num_preference_samples,
-                )
-                results[sentence][f"preference_c{choose_nth_best}"] = preferences["c"] / num_preference_samples
-                results[sentence][f"preference_r{choose_nth_best}"] = preferences["r"] / num_preference_samples
-                results[sentence][f"preference_details_{choose_nth_best}"] = preferences["details"]
-
             results[sentence][f"completion_c{choose_nth_best}"] = completion_c
             results[sentence][f"size_ratio_completion_c{choose_nth_best}"] = size_ratio_completion_c
             results[sentence][f"size_ratio_full_c{choose_nth_best}"] = size_ratio_full_c
@@ -490,13 +622,6 @@ def test_free_completion(
             f"mean_num_unique_words_r{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_words_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
             f"mean_num_unique_tokens_r{choose_nth_best}": torch.tensor([results[sentence][f"num_unique_tokens_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
         }
-        if num_preference_samples:
-            nth_summary.update(
-                {
-                    f"mean_preference_c{choose_nth_best}": torch.tensor([results[sentence][f"preference_c{choose_nth_best}"] for sentence in results]).float().mean().item(),
-                    f"mean_preference_r{choose_nth_best}": torch.tensor([results[sentence][f"preference_r{choose_nth_best}"] for sentence in results]).float().mean().item(),
-                }
-            )
         summary.update(nth_summary)
     results["summary"] = summary
     return results
@@ -651,7 +776,7 @@ def get_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--model_size",
-        type=int, default=773, choices=[1300, 773, 240],
+        type=int, default=773, choices=[1549, 1300, 773, 240],
         help="The model size to use. TYPE: int; DEFAULT: 773"
     )
     parser.add_argument(
@@ -699,6 +824,11 @@ def get_args() -> argparse.Namespace:
         type=int, default=1,
         help="The number of steps to use for generation. TYPE: int; DEFAULT: 1"
     )
+    parser.add_argument(
+        "--collect_preferences",
+        action="store_true", 
+        help="Let GPT-4o-mini compute the preference between different completions"
+    )
 
     return parser.parse_args()
 
@@ -710,9 +840,22 @@ def save_json(data: dict, path: str, postfix: str = ""):
         json.dump(data, f, indent=2)
 
 
-def main():
+def fix_param_names(model_name: str):
+    """Safetensors for some reason added an '_orig_mod' prefix to all param names 
+    in the gpt2.muon runs
+    -> remove it or model won't load"""
+    if "1549M" not in model_name:
+        return
+
+    root_path = Path(f"models--snimu--{model_name.split('/')[1]}")
+    filepath = next(root_path.rglob('model.safetensors'))
+    loaded = safetensors.torch.load_file(filepath)
+    corrected = {k.replace("_orig_mod.", ""): v for k, v in loaded.items()}
+    safetensors.torch.save_file(corrected, filepath)
+
+
+def tests_with_inference(args: argparse.Namespace):
     """Test if the model weights are correctly loaded"""
-    args = get_args()
     if args.model_size == 773:
         model_name_c = "snimu/causal-ul2-C-fineweb10BT-773M-26heads-lr090"
         model_name_r = "snimu/causal-ul2-R-fineweb10BT-773M-26heads-lr090"
@@ -722,6 +865,9 @@ def main():
     elif args.model_size == 1300:
         model_name_c = "snimu/causal-ul2-C-fineweb10BT-1300M-32heads-lr090"
         model_name_r = "snimu/causal-ul2-R-fineweb10BT-1300M-32heads-lr090"
+    elif args.model_size == 1549:
+        model_name_c = "snimu/p1549M_t100B_w1536_d52_h12_b480_s1024_i203450_clip0-15_seed0"
+        model_name_r = "snimu/p1549M_t100B_w1536_d52_h12_b480_s1024_i203450_clip0-15_withMask_seed0"
 
     net_rand = make_net_from_name(model_name_c).to("cpu")
     net_c = make_net_from_name(model_name_c).to("cpu")
@@ -730,12 +876,14 @@ def main():
     assert all([torch.all(p1 == p2) for p1, p2 in zip(net_rand.parameters(), net_c.parameters())])
 
     model_path = download_model(model_name_c)
+    fix_param_names(model_name_c)
     safetensors.torch.load_model(net_c, model_path, device="cpu")
     assert not all([torch.all(p1 == p2) for p1, p2 in zip(net_rand.parameters(), net_c.parameters())])
     del net_rand
 
-    net_r = make_net_from_name(model_name_c).to("cpu")
+    net_r = make_net_from_name(model_name_r).to("cpu")
     model_path = download_model(model_name_r)
+    fix_param_names(model_name_r)
     safetensors.torch.load_model(net_r, model_path, device="cpu")
 
     sentences = [
@@ -807,7 +955,6 @@ def main():
             verbosity=args.verbosity,
             max_choose_nth_best=args.max_choose_nth_best,
             masking_rate=args.masking_rate,
-            num_preference_samples=args.num_preference_samples,
             stepsize=args.stepsize,
         )
         if args.verbosity > 0:
@@ -867,6 +1014,103 @@ def main():
                     f"__stepsize_{args.stepsize}"
                 )
             )
+
+
+def tests_without_inference(args: argparse.Namespace):
+    preferences = {}
+    for i in range(1, args.max_choose_nth_best+1):
+        preferences[f"preference_c1r1_c{i}"] = []
+        preferences[f"preference_c1r1_r{i}"] = []
+        preferences[f"preference_c1r1_details{i}"] = []
+        preferences[f"preference_c2r2_c{i}"] = []
+        preferences[f"preference_c2r2_r{i}"] = []
+        preferences[f"preference_c2r2_details{i}"] = []
+        preferences[f"preference_c1c2_c{i}"] = []
+        preferences[f"preference_c1c2_r{i}"] = []
+        preferences[f"preference_c1c2_details{i}"] = []
+        preferences[f"preference_r1r2_c{i}"] = []
+        preferences[f"preference_r1r2_r{i}"] = []
+        preferences[f"preference_r1r2_details{i}"] = []
+        preferences[f"preference_r1c2_c{i}"] = []
+        preferences[f"preference_r1c2_r{i}"] = []
+        preferences[f"preference_r1c2_details{i}"] = []
+        preferences[f"preference_r2c1_c{i}"] = []
+        preferences[f"preference_r2c1_r{i}"] = []
+        preferences[f"preference_r2c1_details{i}"] = []
+
+    preferences = {
+        "sentence": [],
+        **preferences,
+        "model1_size": [],
+        "model2_size": [],
+        "model1_masking_rate": [],
+        "model2_masking_rate": [],
+        "model1_stepsize": [],
+        "model2_stepsize": [],
+    }
+
+    completion_files = os.listdir("results/evals/custom")
+    completion_files = [f"results/evals/custom/{file}" for file in completion_files if "free_completion" in file]
+
+    for file1, file2 in itertools.pairwise(completion_files):
+        model1_size = file1.split("/")[-1].split("_")[0]
+        model2_size = file2.split("_")[-1].split("_")[0]
+        model1_masking_rate = file1.split("_masking_rate_")[1].split("_percent")[0]
+        model2_masking_rate = file2.split("_masking_rate_")[-1].split("_percent")[0]
+        model1_stepsize = file1.split("_stepsize_")[1].split(".")[0]
+        model2_stepsize = file2.split("_stepsize_")[-1].split(".")[0]
+        with open(file1, "r") as f:
+            data1 = json.load(f)
+        with open(file2, "r") as f:
+            data2 = json.load(f)
+            
+        sentences1 = [sentence for sentence in data1 if sentence != "summary"]
+        sentences2 = [sentence for sentence in data2 if sentence != "summary"]
+        assert all([sentence in sentences1 for sentence in sentences2])
+        assert all([sentence in sentences2 for sentence in sentences1])
+
+        for sentence in sentences1:
+            preferences[sentence].append(sentence)
+            preferences["model1_size"].append(model1_size)
+            preferences["model2_size"].append(model2_size)
+            preferences["model1_masking_rate"].append(model1_masking_rate)
+            preferences["model2_masking_rate"].append(model2_masking_rate)
+            preferences["model1_stepsize"].append(model1_stepsize)
+            preferences["model2_stepsize"].append(model2_stepsize)
+
+            for tok_pos in range(1, args.max_choose_nth_best+1):
+                preference_details_c1r1 = calc_preference_stats(
+                    sentence=sentence,
+                    completion_a=data1[sentence][f"completion_c{tok_pos}"],
+                    completion_b=data1[sentence][f"completion_r{tok_pos}"],
+                    meaning_a=f"c{tok_pos}",
+                    meaning_b=f"r{tok_pos}",
+                    openai_model=args.model,
+                    num_samples=args.num_samples,
+                )
+                preferences[f"preference_c1r1_c{tok_pos}"] = preference_details_c1r1[f"c{tok_pos}"]
+                preferences[f"preference_c1r1_r{tok_pos}"] = preference_details_c1r1[f"r{tok_pos}"]
+                preferences[f"preference_c1r1_details_c{tok_pos}"] = preference_details_c1r1["details_c"]
+                
+                preference_details_c2r2 = calc_preference_stats(
+                    sentence=sentence,
+                    completion_a=data2[sentence][f"completion_c{tok_pos}"],
+                    completion_b=data2[sentence][f"completion_r{tok_pos}"],
+                    meaning_a=f"c{tok_pos}",
+                    meaning_b=f"r{tok_pos}",
+                    openai_model=args.model,
+                    num_samples=args.num_samples,
+                )
+            
+
+
+def main():
+    args = get_args()
+
+    if args.collect_preferences:
+        tests_without_inference(args)
+    else:
+        tests_with_inference(args)
 
 
 if __name__ == "__main__":
