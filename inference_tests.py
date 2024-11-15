@@ -24,6 +24,9 @@ import openai
 import instructor
 
 
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
 load_dotenv()
 
 
@@ -67,10 +70,10 @@ max_seq_len = 4096
 # HLB-GPT model
 with torch.no_grad():
     # Create the base arrays for the learnable linear positional bias. This helps save some memory consumption & processing time
-    bias_range                    = torch.arange(-max_seq_len+1, 1).to("cuda", dtype=torch.bfloat16)
+    bias_range                    = torch.arange(-max_seq_len+1, 1).to(DEVICE, dtype=torch.bfloat16)
     position_bias_base            = bias_range.unsqueeze(0) - bias_range.unsqueeze(1)
     negative_infinity_matrix_base = torch.empty_like(position_bias_base).fill_(-float("inf"))
-    causal_mask = torch.tril(torch.ones((max_seq_len, max_seq_len), device="cuda", dtype=torch.bool))
+    causal_mask = torch.tril(torch.ones((max_seq_len, max_seq_len), device=DEVICE, dtype=torch.bool))
 
 
 class LatentAttentionBlock(nn.Module):
@@ -169,7 +172,7 @@ def make_net(settings: dict[str, Any]):
         'outputs': nn.Linear(settings['width'], total_num_tokens, bias=False),
     })
     net = SpeedyLangNet(network_dict)
-    net = net.to("cuda", dtype=torch.bfloat16)
+    net = net.to(DEVICE, dtype=torch.bfloat16)
     net.eval()
 
     # Initialize the embedding and output matrixes, with weights scaled based upon the dimensionality of the network.
@@ -319,7 +322,7 @@ def make_net_from_name(name: str) -> SpeedyLangNet:
             n_layer=52,
             n_head=12,
             n_embd=1536,
-        ))
+        )).to(DEVICE)
     if "46M" in name:
         depth, width =  8, 384
     elif "240M" in name:
@@ -367,7 +370,7 @@ def generate(
 ) -> tuple[str, list[int], torch.Tensor, torch.Tensor]:
     # Encode the input tokens
     input_ids = encoder.encode_ordinary(query)
-    input_ids = torch.tensor(input_ids, device="cuda", dtype=torch.int)
+    input_ids = torch.tensor(input_ids, device=DEVICE, dtype=torch.int)
     if masking_rate > 0:
         mask_positions = torch.rand(len(input_ids)) < masking_rate
         input_ids[mask_positions] = mask
@@ -386,7 +389,7 @@ def generate(
             inf_ids = torch.cat(
                 [
                     all_ids, 
-                    torch.empty((1, stepsize-1), device="cuda", dtype=torch.int).fill_(mask),
+                    torch.empty((1, stepsize-1), device=DEVICE, dtype=torch.int).fill_(mask),
                 ],
                 dim=1,
             )
@@ -397,7 +400,7 @@ def generate(
         output_ids = output_ids if isinstance(output_ids, list) else [output_ids]
         chars = encoder.decode(output_ids)
         output_str.extend(chars)
-        all_ids = torch.cat([all_ids, torch.tensor(output_ids, device="cuda", dtype=torch.int).unsqueeze(0)], dim=1)
+        all_ids = torch.cat([all_ids, torch.tensor(output_ids, device=DEVICE, dtype=torch.int).unsqueeze(0)], dim=1)
 
     # Get the logprops
     output_logprobs = F.softmax(torch.cat(gen_logits, dim=1), dim=-1).log()
@@ -421,7 +424,7 @@ def calc_tok_pos_speculative(
 ) -> list[int]:
     # Encode the input tokens
     input_ids = encoder.encode_ordinary(query)
-    input_ids = torch.tensor(input_ids, device="cuda", dtype=torch.int)
+    input_ids = torch.tensor(input_ids, device=DEVICE, dtype=torch.int)
     if masking_rate > 0:
         mask_positions = torch.rand(len(input_ids)) < masking_rate
         input_ids[mask_positions] = mask
@@ -431,7 +434,7 @@ def calc_tok_pos_speculative(
     # input_len : -1 because:
     #   - input_len: we want to cut off the first prediction because it is a prediction made without a mask
     #   - -1: the last prediction doesn't predict text that's in the completion; we want to check against the completion -> cut it off
-    gen_toks = torch.tensor(gen_toks, device="cuda", dtype=torch.int)
+    gen_toks = torch.tensor(gen_toks, device=DEVICE, dtype=torch.int)
     logits: torch.Tensor = net(torch.cat([input_ids, gen_toks], dim=1))[:, input_len : -1, :50304]
     causal_pred_ids = logits.argmax(dim=-1).squeeze()
     logprobs = F.softmax(logits, dim=-1).log()
@@ -467,7 +470,7 @@ def calc_acc(completion: str, target_ids: torch.Tensor, encoding: tiktoken.Encod
         completion_ids = completion_ids[:len(target_ids)]
     if len(target_ids) > len(completion_ids):
         target_ids = target_ids[:len(completion_ids)]
-    return (torch.tensor(completion_ids, device="cuda") == target_ids).float().mean().item()
+    return (torch.tensor(completion_ids, device=DEVICE) == target_ids).float().mean().item()
 
 
 def calc_ce_loss(logprobs: torch.Tensor, target_ids: torch.Tensor) -> float:
@@ -714,7 +717,7 @@ def test_split_sentences(
         completion_lengths = list(range(min_completion_len, max_completion_len+1, step_between_completion_lengths))
         for i, completion_length in enumerate(completion_lengths):
             partial_sentence = encoder.decode(input_ids[:-completion_length])
-            target_ids = torch.tensor(input_ids[-completion_length:]).to("cuda")
+            target_ids = torch.tensor(input_ids[-completion_length:]).to(DEVICE)
             details = dict(partial_sentence=partial_sentence, target_ids=target_ids.tolist())
             for choose_nth_best in range(1, max_choose_nth_best+1):
                 loop.set_description(
@@ -829,6 +832,12 @@ def get_args() -> argparse.Namespace:
         action="store_true", 
         help="Let GPT-4o-mini compute the preference between different completions"
     )
+    parser.add_argument(
+        "--compare_all_models",
+        action="store_true",
+        help="Compare the preferences of all models; "
+        "by default, only single model prefs are computed. FLAG"
+    )
 
     return parser.parse_args()
 
@@ -941,8 +950,8 @@ def tests_with_inference(args: argparse.Namespace):
         "A moraine-dammed lake, occurs when the terminal moraine has prevented some meltwater from leaving the valley. When a glacier retreats, there is a space left over between the retreating glacier and the piece that stayed intact which holds leftover debris (moraine). Meltwater from both glaciers seep into this space creating a ribbon-shaped lake due to the pattern of ice melt. This ice melt may cause a glacier lake outburst flood, leading to severe damage to the environment and communities nearby. Examples of moraine-dammed lakes include:",
     ]
 
-    net_c = net_c.to("cuda")
-    net_r = net_r.to("cuda")
+    net_c = net_c.to(DEVICE)
+    net_r = net_r.to(DEVICE)
 
     encoder = tiktoken.get_encoding("gpt2")
     if args.no_test_free_completion:
@@ -1017,7 +1026,62 @@ def tests_with_inference(args: argparse.Namespace):
 
 
 def tests_without_inference(args: argparse.Namespace):
-    preferences = {}
+    if args.compare_all_models:
+        compare_multiple_models(args)
+    else:
+        compare_one_model(args)
+
+
+def compare_one_model(args: argparse.Namespace):
+    files = [
+        file for file in os.listdir("results/evals/custom") 
+        if "free_completion" in file
+        and f"{args.model_size}M" in file
+    ]
+    
+    preferences = dict(sentence=[], file=[])
+    for i in range(1, args.max_choose_nth_best+1):
+        preferences[f"preference_c{i}"] = []
+        preferences[f"preference_r{i}"] = []
+        preferences[f"details{i}"] = []
+
+    for file in files:
+        path = f"results/evals/custom/{file}"
+        with open(path, "r") as f:
+            data = json.load(f)
+
+        sentences = [sentence for sentence in data if sentence != "summary"]
+        for sentence in sentences:
+            prefs = calc_preference_stats(
+                sentence=sentence,
+                completion_a=data[sentence][f"completion_c{i}"],
+                completion_b=data[sentence][f"completion_r{i}"],
+                meaning_a=f"c{i}",
+                meaning_b=f"r{i}",
+                openai_model=args.model,
+                num_samples=args.num_samples,
+            )
+            preferences[f"preference_c{i}"].append(prefs[f"c{i}"])
+            preferences[f"preference_r{i}"].append(prefs[f"r{i}"])
+            preferences[f"details{i}"].append(prefs["details"])
+
+            if args.verbosity > 0:
+                print(f"\n\n{sentence=}\n")
+                print(f"{prefs[f'c{i}']=}\n")
+                print(f"{prefs[f'r{i}']=}\n")
+
+            if args.verbosity > 1:
+                print(f"{prefs['details']=}\n")
+
+        if args.save:
+            save_json(
+                data=preferences,
+                filename=f"results/evals/custom/preferences_{file}",  # file ends in .json
+            )
+
+
+def compare_multiple_models(args: argparse.Namespace):
+    preferences = dict()
     for i in range(1, args.max_choose_nth_best+1):
         preferences[f"preference_c1r1_c{i}"] = []
         preferences[f"preference_c1r1_r{i}"] = []
@@ -1050,7 +1114,11 @@ def tests_without_inference(args: argparse.Namespace):
     }
 
     completion_files = os.listdir("results/evals/custom")
-    completion_files = [f"results/evals/custom/{file}" for file in completion_files if "free_completion" in file]
+    completion_files = [
+        f"results/evals/custom/{file}" 
+        for file in completion_files 
+        if "free_completion" in file
+    ]
 
     for file1, file2 in itertools.pairwise(completion_files):
         model1_size = file1.split("/")[-1].split("_")[0]
@@ -1070,7 +1138,7 @@ def tests_without_inference(args: argparse.Namespace):
         assert all([sentence in sentences2 for sentence in sentences1])
 
         for sentence in sentences1:
-            preferences[sentence].append(sentence)
+            preferences["sentence"].append(sentence)
             preferences["model1_size"].append(model1_size)
             preferences["model2_size"].append(model2_size)
             preferences["model1_masking_rate"].append(model1_masking_rate)
@@ -1090,7 +1158,14 @@ def tests_without_inference(args: argparse.Namespace):
                 )
                 preferences[f"preference_c1r1_c{tok_pos}"] = preference_details_c1r1[f"c{tok_pos}"]
                 preferences[f"preference_c1r1_r{tok_pos}"] = preference_details_c1r1[f"r{tok_pos}"]
-                preferences[f"preference_c1r1_details_c{tok_pos}"] = preference_details_c1r1["details_c"]
+                preferences[f"preference_c1r1_details{tok_pos}"] = preference_details_c1r1["details"]
+
+                if args.verbosity > 0:
+                    print(f"\n\n{sentence=}\n")
+                    print(f"{preference_details_c1r1[f'c{tok_pos}']=}\n")
+                    print(f"{preference_details_c1r1[f'r{tok_pos}']=}\n")
+                if args.verbosity > 1:
+                    print(f"\n{preference_details_c1r1['details']=}\n\n")
                 
                 preference_details_c2r2 = calc_preference_stats(
                     sentence=sentence,
@@ -1101,7 +1176,62 @@ def tests_without_inference(args: argparse.Namespace):
                     openai_model=args.model,
                     num_samples=args.num_samples,
                 )
+                preferences[f"preference_c2r2_c{tok_pos}"] = preference_details_c2r2[f"c{tok_pos}"]
+                preferences[f"preference_c2r2_r{tok_pos}"] = preference_details_c2r2[f"r{tok_pos}"]
+                preferences[f"preference_c2r2_details{tok_pos}"] = preference_details_c2r2["details"]
+
+                if args.verbosity > 0:
+                    print(f"\n\n{sentence=}\n")
+                    print(f"{preference_details_c2r2[f'c{tok_pos}']=}\n")
+                    print(f"{preference_details_c2r2[f'r{tok_pos}']=}\n")
+                if args.verbosity > 1:
+                    print(f"\n{preference_details_c2r2['details']=}\n\n")
+
+                preference_details_c1r2 = calc_preference_stats(
+                    sentence=sentence,
+                    completion_a=data1[sentence][f"completion_c{tok_pos}"],
+                    completion_b=data2[sentence][f"completion_r{tok_pos}"],
+                    meaning_a=f"c{tok_pos}",
+                    meaning_b=f"r{tok_pos}",
+                    openai_model=args.model,
+                    num_samples=args.num_samples,
+                )
+                preferences[f"preference_c1r2_c{tok_pos}"] = preference_details_c1r2[f"c{tok_pos}"]
+                preferences[f"preference_c1r2_r{tok_pos}"] = preference_details_c1r2[f"r{tok_pos}"]
+                preferences[f"preference_c1r2_details{tok_pos}"] = preference_details_c1r2["details"]
+
+                if args.verbosity > 0:
+                    print(f"\n\n{sentence=}\n")
+                    print(f"{preference_details_c1r2[f'c{tok_pos}']=}\n")
+                    print(f"{preference_details_c1r2[f'r{tok_pos}']=}\n")
+                if args.verbosity > 1:
+                    print(f"\n{preference_details_c1r2['details']=}\n\n")
+
+                preference_details_c2r1 = calc_preference_stats(
+                    sentence=sentence,
+                    completion_a=data2[sentence][f"completion_c{tok_pos}"],
+                    completion_b=data1[sentence][f"completion_r{tok_pos}"],
+                    meaning_a=f"c{tok_pos}",
+                    meaning_b=f"r{tok_pos}",
+                    openai_model=args.model,
+                    num_samples=args.num_samples,
+                )
+                preferences[f"preference_c2r1_c{tok_pos}"] = preference_details_c2r1[f"c{tok_pos}"]
+                preferences[f"preference_c2r1_r{tok_pos}"] = preference_details_c2r1[f"r{tok_pos}"]                
+                preferences[f"preference_c2r1_details{tok_pos}"] = preference_details_c2r1["details"]
+
+                if args.verbosity > 0:
+                    print(f"\n\n{sentence=}\n")
+                    print(f"{preference_details_c2r1[f'c{tok_pos}']=}\n")
+                    print(f"{preference_details_c2r1[f'r{tok_pos}']=}\n")
+                if args.verbosity > 1:
+                    print(f"\n{preference_details_c2r1['details']=}\n\n")
             
+    if args.save:
+        save_json(
+            data=preferences,
+            filename="results/evals/custom/preferences_all_models.json",
+        )
 
 
 def main():
