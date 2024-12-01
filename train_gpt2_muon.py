@@ -1,3 +1,15 @@
+# /// script
+# dependencies = [
+#   "torch",
+#   "transformers",
+#   "fastprogress",
+#   "wandb",
+#   "typer",
+#   "safetensors",
+#   "huggingface_hub",
+#   "numpy",
+# ]
+# ///
 
 """Modified from https://github.com/KellerJordan/modded-nanogpt/blob/master/records/102024_ScaleUp1B/c0078066-c8c9-49c8-868a-ff4d4f32e615.txt"""
 
