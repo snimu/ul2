@@ -1,5 +1,3 @@
-git clone https://github.com/snimu/ul2.git
-cd ul2
 pip install uv
 uv venv
 source ./venv/bin/activate
