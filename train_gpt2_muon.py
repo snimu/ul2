@@ -549,16 +549,19 @@ def main(
     # learning rate decay scheduler (linear warmup and warmdown)
     def get_lr(it):
         assert it <= num_iterations
+        factor = 0.0
         # 1) linear warmup for warmup_iters steps
-        if it < warmup_iters:
-            return (it+1) / warmup_iters
-        # 2) constant lr for a while
-        elif it < num_iterations - warmdown_iters:
-            return 1.0
-        # 3) linear warmdown
+        if from_step and it < warmup_iters + from_step:
+            factor = (it+1) / (warmup_iters + from_step)
+        elif it < warmup_iters:
+            factor = (it+1) / warmup_iters
+        # 2) constant
         else:
-            decay_ratio = (num_iterations - it) / warmdown_iters
-            return decay_ratio
+            factor = 1.0
+        # 3) warmdown; overwrites others (relevant in case from_step is set)
+        if it >= num_iterations - warmdown_iters:
+            factor = (num_iterations - it) / warmdown_iters
+        return factor
     schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimizers]
 
     # begin logging
@@ -622,6 +625,9 @@ def main(
     if from_step:
         for step in range(from_step):
             x, y = train_loader.next_batch()
+        # step the schedulers to get the correct warmdown lr
+        for sched in schedulers:
+            sched.step()
     for step in range(from_step or 0, num_iterations + 1):
         last_step = (step == num_iterations)
         # This effectively ignores timing first 10 steps, which are slower for weird reasons.
