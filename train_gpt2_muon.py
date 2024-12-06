@@ -521,7 +521,7 @@ def main(
 
     if master_process and from_step is not None:
         # download the model from project run_name at step from_step
-        path_to_model = hf_hub_download(repo_id=run_name, filename="model.safetensors", revision=f"step{from_step}") 
+        path_to_model = hf_hub_download(repo_id=f"snimu/{run_name}", filename="model.safetensors", revision=f"step{from_step}") 
         model = safetensors.torch.load_file(path_to_model, device="cuda")
 
     if master_process and hf_repo is not None:
