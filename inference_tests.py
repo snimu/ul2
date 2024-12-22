@@ -7,7 +7,7 @@ import gzip
 import json
 import itertools
 from dataclasses import dataclass
-from tqdm import tqdm
+from tqdm.rich import tqdm
 
 from dotenv import load_dotenv
 import torch
@@ -435,6 +435,10 @@ def calc_tok_pos_speculative(
     #   - input_len: we want to cut off the first prediction because it is a prediction made without a mask
     #   - -1: the last prediction doesn't predict text that's in the completion; we want to check against the completion -> cut it off
     gen_toks = torch.tensor(gen_toks, device=DEVICE, dtype=torch.int)
+    if len(gen_toks.shape) > 2:
+        gen_toks = gen_toks.squeeze()
+    if len(gen_toks.shape) == 1:
+        gen_toks = gen_toks.unsqueeze(0)
     logits: torch.Tensor = net(torch.cat([input_ids, gen_toks], dim=1))[:, input_len : -1, :50304]
     causal_pred_ids = logits.argmax(dim=-1).squeeze()
     logprobs = F.softmax(logits, dim=-1).log()
@@ -838,6 +842,12 @@ def get_args() -> argparse.Namespace:
         help="Compare the preferences of all models; "
         "by default, only single model prefs are computed. FLAG"
     )
+    parser.add_argument(
+        "--openai_model",
+        type=str, choices=["gpt-4o", "gpt-4o-mini"],
+        default="gpt-4o-mini",
+        help="Model for computing preferences. TYPE: str; DEFAULT: gpt-4o-mini"
+    )
 
     return parser.parse_args()
 
@@ -1036,7 +1046,7 @@ def compare_one_model(args: argparse.Namespace):
     files = [
         file for file in os.listdir("results/evals/custom") 
         if "free_completion" in file
-        and f"{args.model_size}M" in file
+        and f"{args.model_size}" in file
     ]
     
     preferences = dict(sentence=[], file=[])
@@ -1045,38 +1055,57 @@ def compare_one_model(args: argparse.Namespace):
         preferences[f"preference_r{i}"] = []
         preferences[f"details{i}"] = []
 
-    for file in files:
+    for i, file in enumerate(files):
+        if args.verbosity > 0:
+            print(f"\n\nFILE {i+1}/{len(files)}\n\n")
         path = f"results/evals/custom/{file}"
         with open(path, "r") as f:
             data = json.load(f)
 
         sentences = [sentence for sentence in data if sentence != "summary"]
-        for sentence in sentences:
-            prefs = calc_preference_stats(
-                sentence=sentence,
-                completion_a=data[sentence][f"completion_c{i}"],
-                completion_b=data[sentence][f"completion_r{i}"],
-                meaning_a=f"c{i}",
-                meaning_b=f"r{i}",
-                openai_model=args.model,
-                num_samples=args.num_samples,
-            )
-            preferences[f"preference_c{i}"].append(prefs[f"c{i}"])
-            preferences[f"preference_r{i}"].append(prefs[f"r{i}"])
-            preferences[f"details{i}"].append(prefs["details"])
-
+        loop = tqdm(sentences, disable=args.verbosity==0)
+        for s_num, sentence in enumerate(loop):
             if args.verbosity > 0:
-                print(f"\n\n{sentence=}\n")
-                print(f"{prefs[f'c{i}']=}\n")
-                print(f"{prefs[f'r{i}']=}\n")
+                loop.set_description(f"Working on sentence {s_num+1}/{len(loop)}...")
+                loop.write(f"\n\n{sentence=}\n")
 
-            if args.verbosity > 1:
-                print(f"{prefs['details']=}\n")
+
+            for i in range(1, args.max_choose_nth_best+1):
+                prefs = calc_preference_stats(
+                    sentence=sentence,
+                    completion_a=data[sentence][f"completion_c{i}"],
+                    completion_b=data[sentence][f"completion_r{i}"],
+                    meaning_a=f"c{i}",
+                    meaning_b=f"r{i}",
+                    openai_model=args.openai_model,
+                    num_samples=args.num_preference_samples,
+                )
+                preferences[f"preference_c{i}"].append(prefs[f"c{i}"])
+                preferences[f"preference_r{i}"].append(prefs[f"r{i}"])
+                preferences[f"details{i}"].append(prefs["details"])
+
+                if args.verbosity > 0:
+                    loop.write(f"preference_c{i}={prefs[f'c{i}']}")
+                    loop.write(f"preference_r{i}={prefs[f'r{i}']}")
+                    loop.write(f"R / (R+C) = {prefs[f'r{i}'] / (prefs[f'r{i}'] + prefs[f'c{i}']):.2f}")
+
+                if args.verbosity > 1:
+                    loop.write(f"{prefs['details']=}\n")
+
+        summary = dict()
+        for i in range(1, args.max_choose_nth_best+1):
+            summary[f"preference_c{i}"] = torch.tensor([preferences[f"preference_c{i}"]]).float().mean().item()
+            summary[f"preference_r{i}"] = torch.tensor([preferences[f"preference_r{i}"]]).float().mean().item()
+            summary[f"r{i}/(r_{i}+c_{i})"] = summary[f"preference_r{i}"] / (summary[f"preference_r{i}"] + summary[f"preference_c{i}"])
+        summary["preference_c"] = sum(summary[f"preference_c{i}"] for i in range(1, args.max_choose_nth_best+1)) / args.max_choose_nth_best
+        summary["preference_r"] = sum(summary[f"preference_r{i}"] for i in range(1, args.max_choose_nth_best+1)) / args.max_choose_nth_best
+        summary["r/(r+c)"] = summary["preference_r"] / (summary["preference_r"] + summary["preference_c"])
+        preferences["summary"] = summary
 
         if args.save:
             save_json(
                 data=preferences,
-                filename=f"results/evals/custom/preferences_{file}",  # file ends in .json
+                path=f"results/evals/custom/preferences_{file}",  # file ends in .json
             )
 
 
@@ -1153,8 +1182,8 @@ def compare_multiple_models(args: argparse.Namespace):
                     completion_b=data1[sentence][f"completion_r{tok_pos}"],
                     meaning_a=f"c{tok_pos}",
                     meaning_b=f"r{tok_pos}",
-                    openai_model=args.model,
-                    num_samples=args.num_samples,
+                    openai_model=args.openai_model,
+                    num_samples=args.num_preference_samples,
                 )
                 preferences[f"preference_c1r1_c{tok_pos}"] = preference_details_c1r1[f"c{tok_pos}"]
                 preferences[f"preference_c1r1_r{tok_pos}"] = preference_details_c1r1[f"r{tok_pos}"]
@@ -1173,8 +1202,8 @@ def compare_multiple_models(args: argparse.Namespace):
                     completion_b=data2[sentence][f"completion_r{tok_pos}"],
                     meaning_a=f"c{tok_pos}",
                     meaning_b=f"r{tok_pos}",
-                    openai_model=args.model,
-                    num_samples=args.num_samples,
+                    openai_model=args.openai_model,
+                    num_samples=args.num_preference_samples,
                 )
                 preferences[f"preference_c2r2_c{tok_pos}"] = preference_details_c2r2[f"c{tok_pos}"]
                 preferences[f"preference_c2r2_r{tok_pos}"] = preference_details_c2r2[f"r{tok_pos}"]
@@ -1193,8 +1222,8 @@ def compare_multiple_models(args: argparse.Namespace):
                     completion_b=data2[sentence][f"completion_r{tok_pos}"],
                     meaning_a=f"c{tok_pos}",
                     meaning_b=f"r{tok_pos}",
-                    openai_model=args.model,
-                    num_samples=args.num_samples,
+                    openai_model=args.openai_model,
+                    num_samples=args.num_preference_samples,
                 )
                 preferences[f"preference_c1r2_c{tok_pos}"] = preference_details_c1r2[f"c{tok_pos}"]
                 preferences[f"preference_c1r2_r{tok_pos}"] = preference_details_c1r2[f"r{tok_pos}"]
@@ -1213,8 +1242,8 @@ def compare_multiple_models(args: argparse.Namespace):
                     completion_b=data1[sentence][f"completion_r{tok_pos}"],
                     meaning_a=f"c{tok_pos}",
                     meaning_b=f"r{tok_pos}",
-                    openai_model=args.model,
-                    num_samples=args.num_samples,
+                    openai_model=args.openai_model,
+                    num_samples=args.num_preference_samples,
                 )
                 preferences[f"preference_c2r1_c{tok_pos}"] = preference_details_c2r1[f"c{tok_pos}"]
                 preferences[f"preference_c2r1_r{tok_pos}"] = preference_details_c2r1[f"r{tok_pos}"]                
