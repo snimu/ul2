@@ -84,15 +84,17 @@ def get_cos_sim_stats(
         savefile: str,
 ) -> pl.DataFrame:
     loop = tqdm(dataset.iter_rows(), total=dataset.height)
-    df = pl.DataFrame(columns=["query", "completion", "cos_sim_to_query", "cos_sim_neighbor"])
+    df = pl.DataFrame(columns=["mode", "query", "completion", "cos_sim_to_query", "cos_sim_neighbor"])
     for row in loop:
         query = row["query"]
         completion = row["completion"]
+        mode = row["mode"]
         cos_sim_to_query, cos_sim_neighbor = get_cos_sim_stats_query(
             query, completion, tokenizer, encoding, model, chunksize
         )
         df = df.append(
             {
+                "mode": mode,
                 "query": query,
                 "completion": completion,
                 "cos_sim_to_query": str(cos_sim_to_query),
