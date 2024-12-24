@@ -301,8 +301,8 @@ def generate_completions(
     for i in loop:
         for completion_num in range(num_completions):
             loop.set_description(f"Generating completion {completion_num+1}/{num_completions}")
-            query = encoder.decode(dataset[i])
-            completion = generate(
+            query = encoder.decode(dataset[i].squeeze().tolist())
+            completion, _, _, _ = generate(
                 net=net,
                 encoder=encoder,
                 query=query,
@@ -312,8 +312,8 @@ def generate_completions(
             )[1].to("cpu")
             df = pl.DataFrame(
                 {
-                    "query": [encoder.decode(query)],
-                    "completion": [encoder.decode(completion)],
+                    "query": [query],
+                    "completion": [completion],
                     "mode": [mode],
                 }
             )
