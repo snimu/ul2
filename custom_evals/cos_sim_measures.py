@@ -8,7 +8,7 @@
 #   "tiktoken",
 #   "safetensors",
 #   "huggingface_hub",
-#   "git+https://github.com/huggingface/transformers.git",
+#   "transformers@git+https://github.com/huggingface/transformers.git",
 #   "sentence-transformers",
 #   "flash-attn",
 #   "rich"
