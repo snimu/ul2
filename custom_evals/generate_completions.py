@@ -289,7 +289,6 @@ def get_dataset() -> torch.Tensor:
 def generate_completions(
         net: GPT,
         encoder: tiktoken.Encoding,
-        batchsize: int,
         num_completions: int,
         temperature: float,
         max_gen_tokens: int,
@@ -298,26 +297,24 @@ def generate_completions(
         savefile: str,
         mode: Literal["c", "r"] = "c",
 ) -> pl.DataFrame:
-    loop = tqdm(range(0, len(dataset), batchsize))
+    loop = tqdm(range(len(dataset)))
     for i in loop:
-        start = i
-        stop = i+batchsize if i+batchsize < len(dataset) else None
-        batch = dataset[start:stop].to(DEVICE)
         for completion_num in range(num_completions):
             loop.set_description(f"Generating completion {completion_num+1}/{num_completions}")
-            completions = generate(
+            query = encoder.decode(dataset[i])
+            completion = generate(
                 net=net,
                 encoder=encoder,
-                query=batch,
+                query=query,
                 min_gen_tokens=max_gen_tokens,
                 temperature=temperature,
                 stepsize=stepsize,
             )[1].to("cpu")
             df = pl.DataFrame(
                 {
-                    "query": [encoder.decode(q) for q in batch],
-                    "completion": [encoder.decode(c) for c in completions],
-                    "mode": [mode] * len(completions),
+                    "query": [encoder.decode(query)],
+                    "completion": [encoder.decode(completion)],
+                    "mode": [mode],
                 }
             )
             if Path(savefile).exists():
@@ -330,7 +327,6 @@ def generate_completions(
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--batchsize", type=int, default=32)
     parser.add_argument(
         "--num-completions",
         type=int, default=1,
@@ -378,7 +374,6 @@ def main():
     generate_completions(
         net=net,
         encoder=tiktoken.get_encoding("gpt2"),
-        batchsize=args.batchsize,
         num_completions=args.num_completions,
         temperature=args.temperature,
         max_gen_tokens=args.max_gen_tokens,
