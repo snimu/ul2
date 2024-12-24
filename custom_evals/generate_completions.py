@@ -384,3 +384,7 @@ def main():
         dataset=dataset,
         savefile=args.savefile,
     )
+
+
+if __name__ == "__main__":
+    main()
