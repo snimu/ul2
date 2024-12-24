@@ -219,29 +219,26 @@ def load_gpt(size: int, mode: Literal["c", "r"] = "c") -> GPT:
 def generate(
         net: GPT, 
         encoder: tiktoken.Encoding, 
-        query: str, 
+        input_ids: torch.Tensor,
         min_gen_tokens: int = 128, 
         choose_nth_best: int = 1,
         temperature: float = 0.0,
         masking_rate: float = 0.0,
         mask: int = 50308,
         stepsize: int = 1,
-) -> tuple[str, list[int], torch.Tensor, torch.Tensor]:
-    # Encode the input tokens
-    input_ids = encoder.encode_ordinary(query)
-    input_ids = torch.tensor(input_ids, device=DEVICE, dtype=torch.int)
+        loop: tqdm = None,
+        description: str = "",
+) -> list[str]:
+    assert input_ids.ndim == 2
     if masking_rate > 0:
-        mask_positions = torch.rand(len(input_ids)) < masking_rate
+        mask_positions = torch.rand_like(input_ids) < masking_rate
         input_ids[mask_positions] = mask
-    input_ids = input_ids.unsqueeze(0)
-    input_len = input_ids.shape[1]
     
     # Generate the output tokens
-    output_str = []
     all_ids = input_ids
-    gen_logits = []
-    # Compare to encoded tokens of text because some of them get merged & I want to be able to compare to some target text (which also consists of merged tokens)
-    while len(encoder.encode_ordinary("".join(output_str))) < min_gen_tokens:
+    while all_ids[:, input_ids.shape[1]:].shape[1] < min_gen_tokens:
+        if loop is not None:
+            loop.set_description(description + f" Token {all_ids.shape[1] - input_ids.shape[1]}/{min_gen_tokens}")
         if stepsize == 1:
             inf_ids = all_ids
         else:
@@ -250,33 +247,23 @@ def generate(
                     all_ids, 
                     torch.empty((1, stepsize-1), device=DEVICE, dtype=torch.int).fill_(mask),
                 ],
-                dim=1,
+                dim=0,
             )
 
         logits: torch.Tensor = net(inf_ids)
-        gen_logits.append(logits[:, -stepsize:, :50304])
+        logits[:, :, 50256] = float("-inf")  # no <|endoftext|> token!
         if temperature == 0.0:
-            output_ids = logits[:, -stepsize:, :50304].topk(choose_nth_best, dim=-1).indices[:, :, -1].squeeze().tolist()  # ignore last token position, only decode valid token indices ( up to50304)
+            output_ids = logits[:, -stepsize:, :50304].topk(choose_nth_best, dim=-1).indices[:, :, -1]
         else:
             logits = logits / temperature
             logits = F.softmax(logits, dim=-1)
-            output_ids = [
-                torch.multinomial(t[-stepsize:, :50304], 1).squeeze().tolist()
+            output_ids = torch.cat([
+                torch.multinomial(t[-stepsize:, :50304], 1)
                 for t in logits
-            ]
-        output_ids = output_ids if isinstance(output_ids, list) else [output_ids]
-        chars = encoder.decode(output_ids)
-        output_str.extend(chars)
-        all_ids = torch.cat([all_ids, torch.tensor(output_ids, device=DEVICE, dtype=torch.int).unsqueeze(0)], dim=1)
+            ], dim=0)
+        all_ids = torch.cat([all_ids, output_ids], dim=1)
 
-    # Get the logprops
-    output_logprobs = F.softmax(torch.cat(gen_logits, dim=1), dim=-1).log()
-    input_logprobs = F.softmax(net(input_ids)[:, :, :50304], dim=-1).log()
-    all_logprobs = torch.cat([input_logprobs, output_logprobs], dim=1)
-    
-    # Get the output text
-    output_text = "".join(output_str)
-    return output_text, all_ids[:, input_len:].squeeze().tolist(), all_logprobs, output_logprobs.squeeze()
+    return [encoder.decode(ids) for ids in all_ids[:, input_ids.shape[1]:].tolist()]
 
 
 def get_dataset() -> torch.Tensor:
@@ -299,25 +286,29 @@ def generate_completions(
         dataset: torch.Tensor,
         savefile: str,
         mode: Literal["c", "r"] = "c",
+        batchsize: int = 1,
 ) -> pl.DataFrame:
-    loop = tqdm(range(len(dataset)))
+    loop = tqdm(range(0, len(dataset), batchsize))
     for i in loop:
+        batch = dataset[i:i+batchsize].to(DEVICE)
         for completion_num in range(num_completions):
-            loop.set_description(f"Generating completion {completion_num+1}/{num_completions}")
-            query = encoder.decode(dataset[i].squeeze().tolist())
-            completion, _, _, _ = generate(
+            description = f"Generating completion {completion_num+1}/{num_completions}"
+            loop.set_description(description)
+            completions = generate(
                 net=net,
                 encoder=encoder,
-                query=query,
+                input_ids=batch,
                 min_gen_tokens=max_gen_tokens,
                 temperature=temperature,
                 stepsize=stepsize,
+                loop=loop,
+                description=description,
             )
             df = pl.DataFrame(
                 {
-                    "query": [query],
-                    "completion": [completion],
-                    "mode": [mode],
+                    "query": [encoder.decode(b) for b in batch],
+                    "completion": completions,
+                    "mode": [mode] * len(batch),
                 }
             )
             if Path(savefile).exists():
@@ -330,6 +321,11 @@ def generate_completions(
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
+    parser.add_argument(
+        "--batchsize",
+        type=int, default=1,
+        help="Batchsize. TYPE: int; DEFAULT: 1"
+    )
     parser.add_argument(
         "--num-completions",
         type=int, default=1,
@@ -383,7 +379,8 @@ def main():
         stepsize=args.stepsize,
         dataset=dataset,
         savefile=f"temp-{args.temperature}_toks-{args.max_gen_tokens}_steps-{args.stepsize}_{args.mode.upper()}.csv",
-        mode=args.mode
+        mode=args.mode,
+        batchsize=args.batchsize,
     )
 
 
