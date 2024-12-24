@@ -260,7 +260,10 @@ def generate(
         else:
             logits = logits / temperature
             logits = F.softmax(logits, dim=-1)
-            output_ids = torch.multinomial(logits[:, -stepsize:, :50304], 1).squeeze().tolist()  # ignore last token position, only decode valid token indices ( up to50304)
+            output_ids = [
+                torch.multinomial(t[-stepsize:, :50304], 1).squeeze().tolist()
+                for t in logits
+            ]
         output_ids = output_ids if isinstance(output_ids, list) else [output_ids]
         chars = encoder.decode(output_ids)
         output_str.extend(chars)
@@ -309,7 +312,7 @@ def generate_completions(
                 min_gen_tokens=max_gen_tokens,
                 temperature=temperature,
                 stepsize=stepsize,
-            )[1].to("cpu")
+            )
             df = pl.DataFrame(
                 {
                     "query": [query],
