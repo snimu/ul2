@@ -95,8 +95,8 @@ def get_cos_sim_stats(
             {
                 "query": query,
                 "completion": completion,
-                "cos_sim_to_query": cos_sim_to_query,
-                "cos_sim_neighbor": cos_sim_neighbor,
+                "cos_sim_to_query": str(cos_sim_to_query),
+                "cos_sim_neighbor": str(cos_sim_neighbor),
             }
         )
     df.write_csv(savefile)
