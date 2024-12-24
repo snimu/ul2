@@ -335,7 +335,7 @@ def get_args() -> argparse.Namespace:
         help="The number of completions per query to generate. TYPE: int; DEFAULT: 1"
     )
     parser.add_argument(
-        "--model_size",
+        "--model-size",
         type=int, choices=[2556, 1549], default=2556,
         help="The model size to use. TYPE: int; DEFAULT: 2556"
     )
