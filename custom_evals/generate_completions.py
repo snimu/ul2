@@ -155,14 +155,14 @@ class GPT(nn.Module):
 
 # HELPERS
 
-def get_modelname_from_size(size: int, model: Literal["c", "r"]) -> str:
+def get_modelname_from_size(size: int, mode: Literal["c", "r"]) -> str:
     if size == 1549:
         model_name_c = "snimu/p1549M_t100B_w1536_d52_h12_b480_s1024_i203450_clip0-15_seed0"
         model_name_r = "snimu/p1549M_t100B_w1536_d52_h12_b480_s1024_i203450_clip0-15_withMask_seed0"
     elif size == 2556:
         model_name_c = "snimu/p2556M_t100B_w1792_d64_h14_b480_s1024_i203450_clip0-15_seed1234"
         model_name_r = "snimu/p2556M_t100B_w1792_d64_h14_b480_s1024_i203450_clip0-15_withMask_seed1234"
-    return model_name_c if model == "c" else model_name_r
+    return model_name_c if mode == "c" else model_name_r
 
 
 def make_net_from_name(name: str) -> GPT:
@@ -206,8 +206,8 @@ def fix_param_names(model_name: str):
     safetensors.torch.save_file(corrected, filepath)
 
 
-def load_gpt(size: int) -> GPT:
-    model_name = get_modelname_from_size(size, model="c")
+def load_gpt(size: int, mode: Literal["c", "r"] = "c") -> GPT:
+    model_name = get_modelname_from_size(size, mode=mode)
     net = make_net_from_name(model_name)
     path  = download_model(model_name)
     fix_param_names(model_name)
@@ -296,6 +296,7 @@ def generate_completions(
         stepsize: int,
         dataset: torch.Tensor,
         savefile: str,
+        mode: Literal["c", "r"] = "c",
 ) -> pl.DataFrame:
     loop = tqdm(range(0, len(dataset), batchsize))
     for i in loop:
@@ -316,6 +317,7 @@ def generate_completions(
                 {
                     "query": [encoder.decode(q) for q in batch],
                     "completion": [encoder.decode(c) for c in completions],
+                    "mode": [mode] * len(completions),
                 }
             )
             if Path(savefile).exists():
@@ -340,6 +342,11 @@ def get_args() -> argparse.Namespace:
         help="The model size to use. TYPE: int; DEFAULT: 2556"
     )
     parser.add_argument(
+        "--mode",
+        choices=["c", "r"], default="c",
+        help="The mode to use. TYPE: str; DEFAULT: c"
+    )
+    parser.add_argument(
         "--max-gen-tokens",
         type=int, default=2048,
         help="The maximum number of tokens to generate. TYPE: int; DEFAULT: 2048"
@@ -359,18 +366,13 @@ def get_args() -> argparse.Namespace:
         type=float, default=0.0,
         help="The masking rate to use. TYPE: float; DEFAULT: 0.0"
     )
-    parser.add_argument(
-        "--savefile",
-        type=str, default="results.csv",
-        help="The CSV file to save the results to. TYPE: str; DEFAULT: results.csv"
-    )
 
     return parser.parse_args()
 
 
 def main():
     args = get_args()
-    net = load_gpt(args.model_size)
+    net = load_gpt(args.model_size, args.mode)
     dataset = get_dataset()
 
     generate_completions(
@@ -382,7 +384,8 @@ def main():
         max_gen_tokens=args.max_gen_tokens,
         stepsize=args.stepsize,
         dataset=dataset,
-        savefile=args.savefile,
+        savefile=f"temp-{args.temperature}_toks-{args.max_gen_tokens}_steps-{args.stepsize}_{args.mode.upper()}.csv",
+        mode=args.mode
     )
 
 
