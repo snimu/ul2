@@ -306,7 +306,7 @@ def generate_completions(
             )
             df = pl.DataFrame(
                 {
-                    "query": [encoder.decode(b) for b in batch],
+                    "query": [encoder.decode(b.tolist()) for b in batch],
                     "completion": completions,
                     "mode": [mode] * len(batch),
                 }
