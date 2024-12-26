@@ -378,7 +378,7 @@ def main():
         max_gen_tokens=args.max_gen_tokens,
         stepsize=args.stepsize,
         dataset=dataset,
-        savefile=f"temp-{args.temperature}_toks-{args.max_gen_tokens}_steps-{args.stepsize}_{args.mode.upper()}.csv",
+        savefile=f"temp-{args.temperature}_toks-{args.max_gen_tokens}_steps-{args.stepsize}.csv",
         mode=args.mode,
         batchsize=args.batchsize,
     )
