@@ -15,6 +15,7 @@ import json
 from collections import Counter
 from typing import Literal
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 from tqdm import tqdm
 import dspy
@@ -136,6 +137,168 @@ def ablate_preferences(
     return results
 
 
+class GrammaticalCorrectness(dspy.Signature):
+    """
+    Given a query and a completion by an LLM, judge the grammatical correctness of the completion
+    on a scale from 0 to 10.
+    """
+    query: str = dspy.InputField()
+    completion: str = dspy.InputField()
+    score: float = dspy.OutputField(desc="0 is worst, 10 is best")
+
+
+class Repetitiveness(dspy.Signature):
+    """
+    Given a query and a completion by an LLM, judge the repetitiveness of the completion
+    on a scale from 0 to 10.
+    """
+    query: str = dspy.InputField()
+    completion: str = dspy.InputField()
+    score: float = dspy.OutputField(desc="0 is best, 10 is worst")
+
+
+class Coherence(dspy.Signature):
+    """
+    Given a query and a completion by an LLM, judge the coherence of the completion
+    on a scale from 0 to 10.
+    """
+    query: str = dspy.InputField()
+    completion: str = dspy.InputField()
+    score: float = dspy.OutputField(desc="0 is worst, 10 is best")
+
+
+class Factuality(dspy.Signature):
+    """
+    Given a query and a completion by an LLM, judge the factuality of the completion
+    on a scale from 0 to 10.
+    """
+    query: str = dspy.InputField()
+    completion: str = dspy.InputField()
+    score: float = dspy.OutputField(desc="0 is worst, 10 is best")
+
+
+def ablate_scores(
+        gen_tokens: int = 1024,
+        gen_steps: int = 1,
+        gen_temperature: float = 1.0,
+        judge_temperature: float = 1.0,
+        judge_model: str = "gpt-4o-mini",
+        n: int = 10,
+        cot: bool = False,
+        savefile: str = "results.csv",
+):
+    df = pl.read_csv(
+        Path("..") / "results" / "evals" / "100BT" / "custom" 
+        / f"temp-{gen_temperature}_toks-{gen_tokens}_steps-{gen_steps}.csv"
+    )
+    input_texts = df["query"].unique()
+    loop = tqdm(input_texts)
+
+    def get_score(signature, query, completion):
+        module = dspy.ChainOfThought if cot else dspy.Predict
+        calculate_score = module(signature, temperature=judge_temperature, cache=False)
+        dspy.settings.configure(lm=dspy.LM(f"openai/{judge_model}"))
+        return calculate_score(query=query, completion=completion).score
+
+    for input_text in loop:
+        completions_c = df.filter(pl.col("query") == input_text).get_column("completion").unique()
+        completions_r = df.filter(pl.col("query") == input_text).get_column("completion").unique()
+        assert len(completions_c) == len(completions_r)
+
+        for completion_num, (completion_c, completion_r) in enumerate(zip(completions_c, completions_r)):
+            description = f"Completion {completion_num+1}/{len(completions_c)}"
+
+            with ThreadPoolExecutor(max_workers=n) as pool:
+                loop.set_description(description + "; grammar C")
+                grammar_futures_c = [
+                    pool.submit(get_score, GrammaticalCorrectness, input_text, completion_c)
+                    for _ in range(n)
+                ]
+                grammar_scores_c = [future.result() for future in grammar_futures_c]
+
+                loop.set_description(description + "; grammar R")
+                grammar_futures_r = [
+                    pool.submit(get_score, GrammaticalCorrectness, input_text, completion_r)
+                    for _ in range(n)
+                ]
+                grammar_scores_r = [future.result() for future in grammar_futures_r]
+
+                loop.set_description(description + "; repetitiveness C")
+                repetitiveness_futures_c = [
+                    pool.submit(get_score, Repetitiveness, input_text, completion_c)
+                    for _ in range(n)
+                ]
+                repetitiveness_scores_c = [future.result() for future in repetitiveness_futures_c]
+
+                loop.set_description(description + "; repetitiveness R")
+                repetitiveness_futures_r = [
+                    pool.submit(get_score, Repetitiveness, input_text, completion_r)
+                    for _ in range(n)
+                ]
+                repetitiveness_scores_r = [future.result() for future in repetitiveness_futures_r]
+
+                loop.set_description(description + "; coherence C")
+                coherence_futures_c = [
+                    pool.submit(get_score, Coherence, input_text, completion_c)
+                    for _ in range(n)
+                ]
+                coherence_scores_c = [future.result() for future in coherence_futures_c]
+
+                loop.set_description(description + "; coherence R")
+                coherence_futures_r = [
+                    pool.submit(get_score, Coherence, input_text, completion_r)
+                    for _ in range(n)
+                ]
+                coherence_scores_r = [future.result() for future in coherence_futures_r]
+
+                loop.set_description(description + "; factuality C")
+                factuality_futures_c = [
+                    pool.submit(get_score, Factuality, input_text, completion_c)
+                    for _ in range(n)
+                ]
+                factuality_scores_c = [future.result() for future in factuality_futures_c]
+
+                loop.set_description(description + "; factuality R")
+                factuality_futures_r = [
+                    pool.submit(get_score, Factuality, input_text, completion_r)
+                    for _ in range(n)
+                ]
+                factuality_scores_r = [future.result() for future in factuality_futures_r]
+
+            results = {
+                "mode": ["c"] * len(grammar_scores_c) + ["r"] * len(grammar_scores_r),
+                "model": [judge_model] * (len(grammar_scores_c) + len(grammar_scores_r)),
+                "temperature": [judge_temperature] * (len(grammar_scores_c) + len(grammar_scores_r)),
+                "grammatical_correctness": grammar_scores_c + grammar_scores_r,
+                "repetitiveness": repetitiveness_scores_c + repetitiveness_scores_r,
+                "coherence": coherence_scores_c + coherence_scores_r,
+                "factuality": factuality_scores_c + factuality_scores_r,
+                "query": [input_text] * (len(grammar_scores_c) + len(grammar_scores_r)),
+                "completion": [completion_c] * len(grammar_scores_c) + [completion_r] * len(grammar_scores_r),
+            }
+            df = pl.DataFrame(results)
+            if Path(savefile).exists():
+                with open(savefile, "ab") as f:
+                    df.write_csv(f, include_header=False)
+            else:
+                df.write_csv(savefile)
+
+            # Print summary
+            df = pl.read_csv(savefile)  # Get all data
+            summary_c = df.filter(pl.col("mode") == "c")
+            summary_r = df.filter(pl.col("mode") == "r")
+            loop.write(
+                f"{'-' * 10}\nmode=c\ngrammar={summary_c['grammatical_correctness'].mean():.2f}\n"
+                f"repetitiveness={summary_c['repetitiveness'].mean():.2f}\n"
+                f"coherence={summary_c['coherence'].mean():.2f}\n"
+                f"factuality={summary_c['factuality'].mean():.2f}\n"
+                f"\nmode=r\ngrammar={summary_r['grammatical_correctness'].mean():.2f}\n"
+                f"repetitiveness={summary_r['repetitiveness'].mean():.2f}\n"
+                f"coherence={summary_r['coherence'].mean():.2f}\n"
+                f"factuality={summary_r['factuality'].mean():.2f}\n"
+            )
+
+
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
@@ -174,26 +337,46 @@ def get_args() -> argparse.Namespace:
         action="store_true",
         help="Use chain-of-thought prompting. TYPE: FLAG"
     )
+    parser.add_argument(
+        "--mode",
+        choices=["preferences", "scores"],
+        default="preferences",
+        help="The mode to run. TYPE: str; DEFAULT: preferences"
+    )
 
     return parser.parse_args()
 
 
 def main():
     args = get_args()
-    results = ablate_preferences(
-        gen_tokens=args.gen_tokens,
-        gen_steps=args.gen_steps,
-        gen_temperature=args.gen_temperature,
-        judge_temperature=args.judge_temperature,
-        judge_model=args.judge_model,
-        n=args.n,
-        cot=args.cot,
-    )
-    print(results["summary"])
-    savefile = f"preferences_{args.judge_model}_{args.n}tries_{args.gen_tokens}_{args.gen_steps}_{args.n}{'_WithCoT' if args.cot else ''}.csv"
-    savefile = Path("..") / "results" / "evals" / "100BT" / "custom" / savefile
-    with open(savefile, "w") as f:
-        json.dump(results, f)
+    if args.mode == "preferences":
+        results = ablate_preferences(
+            gen_tokens=args.gen_tokens,
+            gen_steps=args.gen_steps,
+            gen_temperature=args.gen_temperature,
+            judge_temperature=args.judge_temperature,
+            judge_model=args.judge_model,
+            n=args.n,
+            cot=args.cot,
+        )
+        print(results["summary"])
+        savefile = f"preferences_{args.judge_model}_{args.n}tries_{args.gen_tokens}_{args.gen_steps}_{args.n}{'_WithCoT' if args.cot else ''}.csv"
+        savefile = Path("..") / "results" / "evals" / "100BT" / "custom" / savefile
+        with open(savefile, "w") as f:
+            json.dump(results, f)
+    elif args.mode == "scores":
+        savefile = f"scores_{args.judge_model}_{args.n}tries_{args.gen_tokens}_{args.gen_steps}_{args.n}{'_WithCoT' if args.cot else ''}.csv"
+        savefile = Path("..") / "results" / "evals" / "100BT" / "custom" / savefile
+        ablate_scores(
+            gen_tokens=args.gen_tokens,
+            gen_steps=args.gen_steps,
+            gen_temperature=args.gen_temperature,
+            judge_temperature=args.judge_temperature,
+            judge_model=args.judge_model,
+            n=args.n,
+            cot=args.cot,
+            savefile=savefile,
+        )
 
 
 if __name__ == "__main__":
