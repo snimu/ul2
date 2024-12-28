@@ -9,7 +9,6 @@
 #   "safetensors",
 #   "huggingface_hub",
 #   "transformers@git+https://github.com/huggingface/transformers.git",
-#   "flash-attn",
 # ]
 # ///
 
