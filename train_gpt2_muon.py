@@ -560,10 +560,9 @@ def main(
         f"_t{make_bignum_nice(num_tokens)}" 
         f"_w{n_embd}_d{n_layer}_h{n_head}"
         f"_b{batch_size}_s{sequence_length}_i{num_iterations}"
-        f"_clip{clip_min}-{clip_max}"
+        f"_clip{clip_min}-{clip_max}_seed{seed}"
     )
     run_name += "_withMask" if use_mask else ""
-    run_name += f"_seed{seed}"
     print0(f"run name: {run_name}")
 
     if master_process and hf_repo is not None:
