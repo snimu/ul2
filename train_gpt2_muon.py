@@ -359,7 +359,6 @@ class DistributedDataLoader:
             use_mask=False, clip_min=0, clip_max=15,
             mask_schedule: Callable[[int], tuple[float, float, float]] = None,  # step -> width, rate, %no mask
             shuffle_files: bool = False,
-            seed: int = 123234345,
     ):
         self.process_rank = process_rank
         self.num_processes = num_processes
@@ -382,8 +381,7 @@ class DistributedDataLoader:
             ntok_total += int(shard_ntok)
         self.ntok_total = ntok_total
 
-        # set the random seed
-        random.seed(seed)
+        # shuffle files if requested
         if shuffle_files:
             random.shuffle(self.files)
 
@@ -497,7 +495,6 @@ def main(
         use_mask_schedule: bool = False,
         shuffle_files: bool = False,
 ):
-
     if use_mask_schedule:
         assert mask_width_warmup_steps is not None
         assert masking_rate_warmup_steps is not None
@@ -508,6 +505,11 @@ def main(
         assert mask_width_final is not None
         assert masking_rate_final is not None
         assert no_mask_prob_final is not None
+    
+    # Random seed
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
     assert torch.cuda.is_available()
@@ -552,7 +554,6 @@ def main(
         use_mask=use_mask, clip_min=clip_min, clip_max=clip_max,
         mask_schedule=mask_schedule if use_mask_schedule else None,
         shuffle_files=shuffle_files,
-        seed=seed,
     )
     val_loader = DistributedDataLoader(input_val_bin, B, T, ddp_rank, ddp_world_size)
     if master_process:
