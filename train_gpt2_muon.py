@@ -36,7 +36,7 @@ import torch.distributed as dist
 import torch._inductor.config as config
 from torch.nn.parallel import DistributedDataParallel as DDP
 import safetensors.torch
-from huggingface_hub import HfApi, login, hf_hub_download
+from huggingface_hub import HfApi, login
 
 # -----------------------------------------------------------------------------
 # Muon optimizer
@@ -465,7 +465,6 @@ def main(
         hf_repo: str = None,
         clip_min: int = 0,
         clip_max: int = 15,
-        from_step: int | None = None,
 ):
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
@@ -519,11 +518,6 @@ def main(
     run_name += f"_seed{seed}"
     print0(f"run name: {run_name}")
 
-    if master_process and from_step is not None:
-        # download the model from project run_name at step from_step
-        path_to_model = hf_hub_download(repo_id=f"snimu/{run_name}", filename="model.safetensors", revision=f"step{from_step}") 
-        model = safetensors.torch.load_file(path_to_model, device="cuda")
-
     if master_process and hf_repo is not None:
         assert os.getenv("HF_API_TOKEN") is not None, "You need to set the HF_API_TOKEN environment variable to upload the model to Hugging Face"
         api = HfApi()
@@ -549,19 +543,15 @@ def main(
     # learning rate decay scheduler (linear warmup and warmdown)
     def get_lr(it):
         assert it <= num_iterations
-        factor = 0.0
-        # 1) linear warmup for warmup_iters steps
-        if from_step and it < warmup_iters + from_step:
-            factor = (it+1) / (warmup_iters + from_step)
-        elif it < warmup_iters:
-            factor = (it+1) / warmup_iters
-        # 2) constant
+        if it < warmup_iters:
+            return (it+1) / warmup_iters
+        # 2) constant lr for a while
+        elif it < num_iterations - warmdown_iters:
+            return 1.0
+        # 3) linear warmdown
         else:
-            factor = 1.0
-        # 3) warmdown; overwrites others (relevant in case from_step is set)
-        if it >= num_iterations - warmdown_iters:
-            factor = (num_iterations - it) / warmdown_iters
-        return factor
+            decay_ratio = (num_iterations - it) / warmdown_iters
+            return decay_ratio
     schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimizers]
 
     # begin logging
@@ -612,7 +602,6 @@ def main(
                 "save_every": save_every,
                 "clip_min": clip_min,
                 "clip_max": clip_max,
-                "from_step": from_step,
             }
         )
 
@@ -622,13 +611,7 @@ def main(
     t0 = time.time()
     # begin training
     train_loader.reset()
-    if from_step:
-        for step in range(from_step):
-            x, y = train_loader.next_batch()
-        # step the schedulers to get the correct warmdown lr
-        for sched in schedulers:
-            sched.step()
-    for step in range(from_step or 0, num_iterations + 1):
+    for step in range(num_iterations + 1):
         last_step = (step == num_iterations)
         # This effectively ignores timing first 10 steps, which are slower for weird reasons.
         # Alternately, and slightly more correctly in terms of benchmarking, we could do 10
@@ -636,11 +619,10 @@ def main(
         if step == 10:
             training_time_ms = 0
             t0 = time.time()
-        time_steps_from = from_step + 11 if from_step else 11
-        timed_steps = float('nan') if step <= time_steps_from else (step - 10) + 1 # <= 11 to avoid bug in val
+        timed_steps = float('nan') if step <= 11 else (step - 10) + 1 # <= 11 to avoid bug in val
 
         # once in a while evaluate the validation dataset
-        if ((from_step and step != from_step) or not from_step) and (last_step or (val_loss_every > 0 and step % val_loss_every == 0)):
+        if (last_step or (val_loss_every > 0 and step % val_loss_every == 0)):
             # stop the clock
             torch.cuda.synchronize()
             training_time_ms += 1000 * (time.time() - t0)
