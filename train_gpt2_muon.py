@@ -405,7 +405,8 @@ class DistributedDataLoader:
             if mask_width > 0:
                 x = _mask_spans(x, mask_width=mask_width, masking_rate=0.15, mask_token=50257)
         elif self.use_mask:
-            mask_width, masking_rate, no_mask_prob = self.mask_schedule(step)
+            mask_width_mean, masking_rate, no_mask_prob = self.mask_schedule(step)
+            mask_width = _randomize_with_mean(mask_width_mean, clip_min=self.clip_min, clip_max=self.clip_max)
             if random.random() >= no_mask_prob:
                 x = _mask_spans(x, mask_width=mask_width, masking_rate=masking_rate, mask_token=50257)
         y = (buf[1:]).view(B, T) # targets
@@ -481,7 +482,19 @@ def main(
         no_mask_prob_warmup_steps: int = None,
         no_mask_prob_initial: float = None,
         no_mask_prob_final: float = None,
+        use_mask_schedule: bool = False,
 ):
+
+    if use_mask_schedule:
+        assert mask_width_warmup_steps is not None
+        assert masking_rate_warmup_steps is not None
+        assert no_mask_prob_warmup_steps is not None
+        assert mask_width_initial is not None
+        assert masking_rate_initial is not None
+        assert no_mask_prob_initial is not None
+        assert mask_width_final is not None
+        assert masking_rate_final is not None
+        assert no_mask_prob_final is not None
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
     assert torch.cuda.is_available()
@@ -520,11 +533,6 @@ def main(
             no_mask_prob_initial, no_mask_prob_final, step / no_mask_prob_warmup_steps
         )
         return mean_mask_width, masking_rate, no_mask_prob
-
-    use_mask_schedule = all(
-        x is not None
-        for x in (mask_width_warmup_steps, masking_rate_warmup_steps, no_mask_prob_warmup_steps)
-    )
 
     # load tokens
     train_loader = DistributedDataLoader(
