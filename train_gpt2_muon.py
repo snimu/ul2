@@ -345,8 +345,11 @@ def _mask_spans(
     return inputs
 
 
-def _randomize_with_mean(mean: int | float, clip_min: int = 0, clip_max: int = 15) -> int | float:
-    x = torch.randn(1000) * mean / 4 + mean
+def _randomize_with_mean(
+        mean: int | float, clip_min: int = 0, clip_max: int = 15, spread: float = 1.0
+) -> int | float:
+    std_dev = spread * mean / 4
+    x = torch.randn(1000) * std_dev + mean
     x = torch.clamp(x, clip_min, clip_max)
     return int(x.round()[torch.randint(0, 1000, (1,))])
 
@@ -406,7 +409,9 @@ class DistributedDataLoader:
                 x = _mask_spans(x, mask_width=mask_width, masking_rate=0.15, mask_token=50257)
         elif self.use_mask:
             mask_width_mean, masking_rate, no_mask_prob = self.mask_schedule(step)
-            mask_width = _randomize_with_mean(mask_width_mean, clip_min=self.clip_min, clip_max=self.clip_max)
+            mask_width = _randomize_with_mean(
+                mask_width_mean, clip_min=self.clip_min, clip_max=self.clip_max, spread=1.5,
+            )
             if random.random() >= no_mask_prob:
                 x = _mask_spans(x, mask_width=mask_width, masking_rate=masking_rate, mask_token=50257)
         y = (buf[1:]).view(B, T) # targets
