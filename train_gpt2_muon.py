@@ -358,6 +358,8 @@ class DistributedDataLoader:
             self, filename_pattern, B, T, process_rank, num_processes, 
             use_mask=False, clip_min=0, clip_max=15,
             mask_schedule: Callable[[int], tuple[float, float, float]] = None,  # step -> width, rate, %no mask
+            shuffle_files: bool = False,
+            seed: int = 123234345,
     ):
         self.process_rank = process_rank
         self.num_processes = num_processes
@@ -379,6 +381,11 @@ class DistributedDataLoader:
             assert shard_ntok >= num_processes * B * T + 1
             ntok_total += int(shard_ntok)
         self.ntok_total = ntok_total
+
+        # set the random seed
+        random.seed(seed)
+        if shuffle_files:
+            random.shuffle(self.files)
 
         # kick things off
         self.reset()
@@ -488,6 +495,7 @@ def main(
         no_mask_prob_initial: float = None,
         no_mask_prob_final: float = None,
         use_mask_schedule: bool = False,
+        shuffle_files: bool = False,
 ):
 
     if use_mask_schedule:
@@ -543,6 +551,8 @@ def main(
         input_bin, B, T, ddp_rank, ddp_world_size, 
         use_mask=use_mask, clip_min=clip_min, clip_max=clip_max,
         mask_schedule=mask_schedule if use_mask_schedule else None,
+        shuffle_files=shuffle_files,
+        seed=seed,
     )
     val_loader = DistributedDataLoader(input_val_bin, B, T, ddp_rank, ddp_world_size)
     if master_process:
