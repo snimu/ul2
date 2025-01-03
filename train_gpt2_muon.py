@@ -345,7 +345,7 @@ def _mask_spans(
     return inputs
 
 
-def _randomize_with_mean(mean: int, clip_min: int = 0, clip_max: int = 15) -> int | float:
+def _randomize_with_mean(mean: int | float, clip_min: int = 0, clip_max: int = 15) -> int | float:
     x = torch.randn(1000) * mean / 4 + mean
     x = torch.clamp(x, clip_min, clip_max)
     return int(x.round()[torch.randint(0, 1000, (1,))])
@@ -354,7 +354,7 @@ class DistributedDataLoader:
     def __init__(
             self, filename_pattern, B, T, process_rank, num_processes, 
             use_mask=False, clip_min=0, clip_max=15,
-            mask_schedule: Callable[[int], tuple[int, float, float]] = None,  # step -> width, rate, %no mask
+            mask_schedule: Callable[[int], tuple[float, float, float]] = None,  # step -> width, rate, %no mask
     ):
         self.process_rank = process_rank
         self.num_processes = num_processes
@@ -521,11 +521,10 @@ def main(
             return None
         return a + (b - a) * t
 
-    def mask_schedule(step: int) -> tuple[int, float, float]:
+    def mask_schedule(step: int) -> tuple[float, float, float]:
         mean_mask_width = lerp(
             mask_width_initial, mask_width_final, step / mask_width_warmup_steps
         )
-        mean_mask_width = round(mean_mask_width) if mean_mask_width is not None else None
         masking_rate = lerp(
             masking_rate_initial, masking_rate_final, step / masking_rate_warmup_steps
         )
