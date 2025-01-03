@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass
 import math
 import random
-from typing import Literal
+from typing import Callable, Literal
 
 import typer
 import wandb
@@ -354,6 +354,7 @@ class DistributedDataLoader:
     def __init__(
             self, filename_pattern, B, T, process_rank, num_processes, 
             use_mask=False, clip_min=0, clip_max=15,
+            mask_schedule: Callable[[int], tuple[int, float, float]] = None,  # step -> width, rate, %no mask
     ):
         self.process_rank = process_rank
         self.num_processes = num_processes
@@ -362,6 +363,7 @@ class DistributedDataLoader:
         self.use_mask = use_mask
         self.clip_min = clip_min
         self.clip_max = clip_max
+        self.mask_schedule = mask_schedule
 
         # glob files that match the pattern
         self.files = sorted(glob.glob(filename_pattern))
@@ -388,19 +390,24 @@ class DistributedDataLoader:
         self.current_position = self.process_rank * self.B * self.T
         self.tokens = _load_data_shard(self.files[self.current_shard])
 
-    def next_batch(self):
+    def next_batch(self, step: int = None):
         B = self.B
         T = self.T
         buf = self.tokens[self.current_position : self.current_position+B*T+1]
         buf = torch.tensor(buf.astype(np.int32), dtype=torch.long)
         x = (buf[:-1]).view(B, T) # inputs
-        if self.use_mask:
+        # Apply mask
+        if self.use_mask and (step is None or self.mask_schedule is None):
             # R-denoising from UL2
             mean = random.choice((3, 8))
             # jitter around mean --> allow arbitrary masking rates
             mask_width = _randomize_with_mean(mean, clip_min=self.clip_min, clip_max=self.clip_max)
             if mask_width > 0:
                 x = _mask_spans(x, mask_width=mask_width, masking_rate=0.15, mask_token=50257)
+        elif self.use_mask:
+            mask_width, masking_rate, no_mask_prob = self.mask_schedule(step)
+            if random.random() >= no_mask_prob:
+                x = _mask_spans(x, mask_width=mask_width, masking_rate=masking_rate, mask_token=50257)
         y = (buf[1:]).view(B, T) # targets
         # advance current position and load next shard if necessary
         self.current_position += B * T * self.num_processes
@@ -465,6 +472,15 @@ def main(
         hf_repo: str = None,
         clip_min: int = 0,
         clip_max: int = 15,
+        mask_width_warmup_steps: int = None,
+        mask_width_initial: int = None,
+        mask_width_final: int = None,
+        masking_rate_warmup_steps: int = None,
+        masking_rate_initial: float = None,
+        masking_rate_final: float = None,
+        no_mask_prob_warmup_steps: int = None,
+        no_mask_prob_initial: float = None,
+        no_mask_prob_final: float = None,
 ):
 
     # set up DDP (distributed data parallel). torchrun sets this env variable
@@ -487,10 +503,34 @@ def main(
     assert batch_size % (B * ddp_world_size) == 0
     train_accumulation_steps = batch_size // (B * ddp_world_size)
 
+    def lerp(a, b, t):
+        if any(x is None for x in (a, b, t)):
+            return None
+        return a + (b - a) * t
+
+    def mask_schedule(step: int) -> tuple[int, float, float]:
+        mean_mask_width = lerp(
+            mask_width_initial, mask_width_final, step / mask_width_warmup_steps
+        )
+        mean_mask_width = round(mean_mask_width) if mean_mask_width is not None else None
+        masking_rate = lerp(
+            masking_rate_initial, masking_rate_final, step / masking_rate_warmup_steps
+        )
+        no_mask_prob = lerp(
+            no_mask_prob_initial, no_mask_prob_final, step / no_mask_prob_warmup_steps
+        )
+        return mean_mask_width, masking_rate, no_mask_prob
+
+    use_mask_schedule = all(
+        x is not None
+        for x in (mask_width_warmup_steps, masking_rate_warmup_steps, no_mask_prob_warmup_steps)
+    )
+
     # load tokens
     train_loader = DistributedDataLoader(
         input_bin, B, T, ddp_rank, ddp_world_size, 
         use_mask=use_mask, clip_min=clip_min, clip_max=clip_max,
+        mask_schedule=mask_schedule if use_mask_schedule else None,
     )
     val_loader = DistributedDataLoader(input_val_bin, B, T, ddp_rank, ddp_world_size)
     if master_process:
@@ -681,7 +721,7 @@ def main(
                 _, loss = model(x, y, return_logits=False)
                 train_loss = loss.detach()
             # advance the dataset for the next batch
-            x, y = train_loader.next_batch()
+            x, y = train_loader.next_batch(step=step)
             # backward pass
             if i < train_accumulation_steps:
                 with model.no_sync(): # there's no need to sync gradients every accumulation step
